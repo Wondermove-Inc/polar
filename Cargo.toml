@@ -3,6 +3,7 @@ name = "polar"
 version = "0.1.0"
 edition = "2024"
 publish = false
+readme = "docs/README.md"
 
 [dependencies]
 keyvalues-parser = "0.2.4"

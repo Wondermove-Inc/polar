@@ -11,6 +11,7 @@ use std::{
 pub struct Game {
     pub id: u32,
     pub name: String,
+    pub installation: PathBuf,
 }
 
 #[derive(Debug, Default)]
@@ -114,6 +115,7 @@ fn read_game(apps: &Path, file: &Path, expected_id: u32) -> Result<Option<Game>,
         Ok(metadata) if metadata.is_dir() => Ok(Some(Game {
             id,
             name: name.to_owned(),
+            installation,
         })),
         Ok(_) => Err(format!(
             "not an installation directory: {}",
@@ -196,3 +198,8 @@ pub fn request_launch(id: u32) -> Result<(), String> {
     };
     platform::open_uri(&uri)
 }
+
+pub mod appinfo;
+pub mod catalog;
+pub mod saved;
+pub mod session;

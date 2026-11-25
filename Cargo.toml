@@ -1,0 +1,15 @@
+[package]
+name = "polar"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+keyvalues-parser = "0.2.4"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"

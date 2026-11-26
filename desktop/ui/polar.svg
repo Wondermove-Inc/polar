@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2=".85" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#17383e"/><stop offset=".52" stop-color="#10222f"/><stop offset="1" stop-color="#131729"/>
+    </linearGradient>
+    <linearGradient id="rim" x2=".55" y2="1">
+      <stop stop-color="#7eb4b6"/><stop offset=".5" stop-color="#35505e"/><stop offset="1" stop-color="#33394e"/>
+    </linearGradient>
+    <linearGradient id="silk" gradientUnits="userSpaceOnUse" x1="99" y1="68" x2="178" y2="146">
+      <stop stop-color="#e7ffdb"/><stop offset=".27" stop-color="#a4f9cc"/><stop offset=".64" stop-color="#58dfce"/><stop offset="1" stop-color="#43b2dc"/>
+    </linearGradient>
+    <linearGradient id="stem" gradientUnits="userSpaceOnUse" x1="98" y1="77" x2="74" y2="202">
+      <stop stop-color="#9df4ce"/><stop offset=".48" stop-color="#54d9db"/><stop offset="1" stop-color="#709afa"/>
+    </linearGradient>
+    <linearGradient id="fold" gradientUnits="userSpaceOnUse" x1="110" y1="148" x2="190" y2="98">
+      <stop stop-color="#575dc0"/><stop offset=".44" stop-color="#6e89e6"/><stop offset="1" stop-color="#5bdcdd"/>
+    </linearGradient>
+    <path id="p" fill-rule="evenodd" clip-rule="evenodd" d="M57 205 83 82Q85 72 95 68l49-22c28-12 52 0 59 21 10 29-8 56-37 70l-57 27-6 22ZM120 92l-8 38 40-19c15-7 23-18 19-28-3-7-11-9-21-4Z"/>
+    <clipPath id="cut"><use href="#p"/></clipPath>
+  </defs>
+  <rect x="5" y="5" width="246" height="246" rx="57" fill="url(#night)" stroke="url(#rim)" stroke-width="2"/>
+  <use href="#p" fill="url(#silk)"/>
+  <g clip-path="url(#cut)">
+    <path d="M53 210 82 75 121 90 104 189Z" fill="url(#stem)"/>
+    <path d="M109 164 112 130l40-19c25-12 43-29 48-49 11 23 16 56-27 79Z" fill="url(#fold)"/>
+    <path d="m57 205 26-123q2-10 12-14l49-22c18-8 32-6 43 0-15-4-27-1-42 5L98 72q-9 4-12 15Z" fill="#edfff0" opacity=".67"/>
+  </g>
+</svg>

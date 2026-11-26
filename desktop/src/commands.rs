@@ -31,7 +31,11 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn discover(app: AppHandle, source: String) -> Result<Report, String> {
+pub async fn discover(
+    app: AppHandle,
+    source: String,
+    linked_folders: Option<Vec<String>>,
+) -> Result<Report, String> {
     blocking(move || {
         if source == "manual" {
             let entries = native::read_manual(&file(&app)?)?;
@@ -43,7 +47,10 @@ pub async fn discover(app: AppHandle, source: String) -> Result<Report, String> 
         if !["steam", "epic", "xbox"].contains(&source.as_str()) {
             return Err("source".into());
         }
-        let report = native::source(&source);
+        let mut report = native::source(&source);
+        if source == "epic" {
+            report.match_epic_links(linked_folders.as_deref().unwrap_or_default());
+        }
         let state = app.state::<Data>();
         let mut known = state.known.lock().unwrap();
         if report.complete {

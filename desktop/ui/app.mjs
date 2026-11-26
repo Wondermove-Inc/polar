@@ -1,4 +1,6 @@
+import {importCover,readCover,writeCover} from './custom-cover.mjs';
 import {decodeBackground, homeBackground} from './background.mjs';
+import {folderKey,folderName,mergeLinkedShortcuts,unresolvedFolders} from './epic-pending.mjs';
 import {languageFor, libraryView, mergeSource, words} from './model.mjs';
 
 const $=selector=>document.querySelector(selector);
@@ -24,6 +26,7 @@ const platformNames={steam:'Steam',xbox:'PC Game Pass',epic:'Epic Games'};
 const stateKey='polar.desktop.v1';
 let saved={};
 try{saved=JSON.parse(localStorage.getItem(stateKey)||'{}')||{}}catch{}
+const epicLinks=Object.assign(Object.create(null),saved.epicLinks);
 let rows=Array.isArray(saved.rows)?saved.rows.filter(g=>g&&typeof g.id==='string'&&typeof g.name==='string'&&platforms.includes(g.source)):[];
 let favorites=Array.isArray(saved.favorites)?saved.favorites:[],recent=Array.isArray(saved.recent)?saved.recent:[];
 let current=typeof saved.current==='string'?saved.current:'',lang=Object.hasOwn(words,saved.lang)?saved.lang:languageFor(navigator.languages);
@@ -34,10 +37,12 @@ let library=false,editing=false,filter='all',section='display',modal='',origin=n
 let games=[],tiles=[],scanning=false,launching=false,phase='idle',launchId='',poll=null,hasPad=false;
 let selectedApps=[],draft=null,replaceId=null,firstScan=true,introduced=false;
 let folders=[],folderBusy=false;
-const reports=new Map(),artCache=new Map(),coverRatios=new Map();
+const reports=new Map(),artCache=new Map();
 let onlineArt=saved.onlineArt!==false;
 const artSources=Object.assign(Object.create(null),saved.artSources);
+const names=Object.assign(Object.create(null),saved.names);
 const setBackground=homeBackground($('#fade'),invoke);
+let ambientRequest;
 function background(refresh=false){
  const game=games.find(g=>g.id===current);
  const override=artSources[current]||artSources[game?.alias];
@@ -47,8 +52,9 @@ function background(refresh=false){
  if(ambient.dataset.key!==coverKey || refresh){
   ambient.dataset.key=coverKey;
   ambient.style.removeProperty('--cover');
-  if(active)coverArt(active).then(image=>{
-   if(image && ambient.dataset.key===coverKey)ambient.style.setProperty('--cover','url('+image+')');
+  const request=ambientRequest=active?coverArt(active):null;
+  request?.then(image=>{
+   if(image && ambientRequest===request)ambient.style.setProperty('--cover','url('+image+')');
   });
  }
  setBackground(library||!game?'':current,source,onlineArt,!!override,refresh);
@@ -56,8 +62,8 @@ function background(refresh=false){
 const tr=key=>words[lang][key],platform=src=>platformNames[src]||tr('manual');
 const count=n=>tr(n===1?'countOne':'countMany').replace('{n}',new Intl.NumberFormat(lang).format(n));
 function persist(){
-  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites,recent,current,lang,motion,fullscreen,onlineArt,artSources}))}
-  catch{$('#notice').textContent=tr('storage')}
+  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites,recent,current,lang,motion,fullscreen,onlineArt,artSources,names,epicLinks}));return true}
+  catch{(panel.open?$('#alert'):$('#notice')).textContent=tr('storage');return false}
 }
 function button(text,fn,cls='quietBtn'){
   const b=document.createElement('button');b.className=cls;b.textContent=text;b.onclick=fn;return b;
@@ -71,47 +77,52 @@ function hints(){
 }
 function localize(){
  document.documentElement.lang=lang;for(const e of document.querySelectorAll('[data-word]'))e.textContent=tr(e.dataset.word);
- $('#nav').ariaLabel=tr('mainNav');rail.ariaLabel=tr('recent');$('.filters').ariaLabel=tr('sourceFilter');for(const key of ['previousGame','nextGame'])$('#'+key).ariaLabel=tr(key);clock();hints();
+ $('#gameOptions').ariaLabel=$('#gameOptions').title=tr('gameEdit');$('#nav').ariaLabel=tr('mainNav');rail.ariaLabel=tr('recent');$('.filters').ariaLabel=tr('sourceFilter');for(const key of ['previousGame','nextGame'])$('#'+key).ariaLabel=tr(key);clock();hints();
 }
 function hue(id){let hash=0;for(const ch of id)hash=(hash*31+ch.charCodeAt(0))|0;return String(Math.abs(hash)%360)}
 function steamCover(id){
  const link=artSources[id]||artSources[games.find(g=>g.id===id)?.alias];
  return /^steam:[1-9]\d*$/.test(id)?id:link?.startsWith('steam:')?link:null;
 }
-function coverCacheKey(id){return id+'|'+(steamCover(id)||'')+'|'+onlineArt}
+function coverCacheKey(id){return id+'|'+(games.find(g=>g.id===id)?.alias||'')+'|'+(steamCover(id)||'')+'|'+onlineArt}
+function clearCovers(ids){
+ for(const [key,entry] of artCache)if(ids.has(entry.id))artCache.delete(key);
+}
 function coverArt(id){
  const key=coverCacheKey(id);
  if(!artCache.has(key)){
   if(artCache.size>=72)artCache.delete(artCache.keys().next().value);
   const source=steamCover(id),online=onlineArt;
-  artCache.set(key,(async()=>{
+  const image=(async()=>{
+   const alias=games.find(g=>g.id===id)?.alias;
+   const custom=await readCover(id,alias).catch(()=>null);
+   if(custom)return custom;
+   async function portrait(){
+    if(!source||(online&&!onlineArt))return null;
+    return invoke('online_cover',{id:Number(source.slice(6)),online}).catch(()=>null);
+   }
+   if(source&&!id.startsWith('steam:')){
+    const image=await portrait();if(image)return image;
+   }
    const local=await invoke('artwork',{id,hero:false}).catch(()=>null);
    if(typeof local==='string'){
     const image=new Image();image.src=local;
     try{await image.decode();return local}catch{}
    }
-   if(!source || (online&&!onlineArt))return null;
-   const remote=await invoke('online_cover',{id:Number(source.slice(6)),online}).catch(()=>null);
-   return typeof remote==='string'?remote:null;
-  })());
+   return id.startsWith('steam:')?portrait():null;
+  })();
+  artCache.set(key,{id,image});
  }
- return artCache.get(key);
+ return artCache.get(key).image;
 }
 function fitCover(target,image){
  if(!target.isConnected)return;
- if(target.classList.contains('tile')){
-  const ratio=image.naturalWidth/image.naturalHeight;
-  if(coverRatios.get(target.dataset.id)!==ratio){
-   const selected=rail.querySelector('.sel');
-   const rect=selected?.getBoundingClientRect(),bounds=rail.getBoundingClientRect();
-   const inView=rect&&rect.right>bounds.left&&rect.left<bounds.right;
-   coverRatios.set(target.dataset.id,ratio);
-   target.style.setProperty('--ratio',ratio);
-   if(inView)settleRail();
-  }
+ if(Math.abs(image.naturalWidth/image.naturalHeight-2/3)>.02){
+  target.style.setProperty('--tint','url("'+image.src+'")');
  }
  target.classList.add('hasArt');
 }
+
 const observer=new IntersectionObserver(entries=>{
  for(const {isIntersecting,target} of entries)if(isIntersecting){
    observer.unobserve(target);
@@ -130,7 +141,9 @@ function tile(game,small){
    if(!small){current=game.id;library=false;render(true)}else select(game.id,true);
  },small?'tile':'card');
  b.dataset.id=game.id;b.title=game.name;b.ariaLabel=game.name+' · '+platform(game.source);b.style.setProperty('--hue',hue(game.id));
- if(small){b.style.setProperty('--ratio',coverRatios.get(game.id)||(game.id.startsWith('steam:')?2/3:1));b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
+ b.setAttribute('aria-haspopup','dialog');
+ b.oncontextmenu=e=>{e.preventDefault();editGame(game,b)};
+ if(small){b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
  const cover=small?b:el('div','','cover');cover.dataset.art=game.id;cover.dataset.initials=(game.name.match(/[\p{L}\p{N}]+/gu)||[]).slice(0,2).map(w=>[...w][0]).join('').toLocaleUpperCase(lang);observer.observe(cover);
  if(!small){b.append(cover,el('b',game.name),el('small',platform(game.source)));if(editing)b.setAttribute('aria-pressed',String(favorites.includes(game.id)||favorites.includes(game.alias)))}
  return b;
@@ -139,6 +152,17 @@ function favorite(id,b){
  const alias=games.find(g=>g.id===id)?.alias;
  favorites=favorites.includes(id)||favorites.includes(alias)?favorites.filter(x=>x!==id&&x!==alias):[...favorites,id];
  b.setAttribute('aria-pressed',String(favorites.includes(id)));persist();
+}
+const pendingEpic=()=>unresolvedFolders(reports.get('epic'),rows,epicLinks);
+function pendingCard(path){
+ const b=button('',()=>addDialog(null,path),'card');
+ b.dataset.epicFolder=path;b.title=path;
+ const cover=el('div','','cover');cover.dataset.initials='+';cover.ariaHidden='true';
+ b.style.setProperty('--hue','196');b.append(cover,el('b',folderName(path)),el('small',tr('connectShortcut')));
+ return b;
+}
+function libraryCount(confirmed,pending){
+ return pending?count(confirmed)+' · '+tr('pendingEpicCount').replace('{n}',new Intl.NumberFormat(lang).format(pending)):count(confirmed);
 }
 function select(id,focus=false){
  const game=games.find(g=>g.id===id);if(!game)return;
@@ -160,8 +184,9 @@ function select(id,focus=false){
  $('.counter').textContent=count(games.length);
 }
 function render(focus=false){
- const active=document.activeElement,focusId=active?.dataset.id,wasRail=rail.contains(active),wasGrid=grid.contains(active);
- observer.disconnect();games=libraryView(rows,'all',favorites,lang);
+ const active=document.activeElement,focusId=active?.dataset.id,focusFolder=active?.dataset.epicFolder,wasRail=rail.contains(active),wasGrid=grid.contains(active);
+ const linkedRows=mergeLinkedShortcuts(rows,reports.get('epic'),epicLinks);
+ observer.disconnect();games=libraryView(linkedRows,'all',favorites,lang,names);
  if(!games.some(g=>g.id===current))current=games.find(g=>g.alias===current)?.id||games[0]?.id||'';
  const byId=new Map(games.map(g=>[g.id,g]));
  const aliases=new Map(games.filter(g=>g.alias).map(g=>[g.alias,g.id]));
@@ -171,21 +196,27 @@ function render(focus=false){
  for(const [id,on] of [['#library',library],['#home',!library]]){if(on)$(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current')}
  $('#shelf').hidden=rail.hidden=library||!games.length;$('#stage').hidden=library;$('.lib').hidden=!library;
  $('.details').hidden=!games.length;$('#homeEmpty').hidden=!!games.length||firstScan;$('#homeLoading').hidden=!!games.length||!firstScan;
+ const pending=pendingEpic();
+ $('#homeEmpty h2').textContent=tr(pending.length?'foundEpicFolder':'empty');
+ $('#homeEmpty p').textContent=tr(pending.length?'connectHelp':'emptyHelp');
+ $('#addEmpty').textContent=tr(pending.length?'connectEpic':'add');
  if(!introduced&&(games.length||!firstScan)){
   introduced=true;root.classList.add('entering');setTimeout(()=>root.classList.remove('entering'),650);
  }
  selectionSize.disconnect();rail.replaceChildren(...tiles.map(g=>tile(g,true)));
  if(current)select(current,!library&&!panel.open&&(focus||wasRail));
- if(!games.length){background();$('.counter').textContent=count(0)}
+ if(!games.length){background();$('.counter').textContent=libraryCount(0,pending.length)}
  if(library){
   $('.filters').replaceChildren(...['all','steam','xbox','epic','favorites'].map(k=>{
    const b=button(platformNames[k]||tr(k),()=>{editing=false;filter=k;render();[...$('.filters').children].find(x=>x.dataset.key===k)?.focus()},'filter');
    b.dataset.key=k;b.setAttribute('aria-pressed',String(filter===k));return b;
   }));
   $('#edit').hidden=filter!=='favorites';$('#edit').textContent=tr(editing?'done':'edit');
-  const list=libraryView(rows,editing?'all':filter,favorites,lang);grid.replaceChildren(...list.map(g=>tile(g,false)));
-  $('.empty').hidden=!!list.length;$('.counter').textContent=count(list.length);
-  if(wasGrid&&!panel.open)([...grid.children].find(b=>b.dataset.id===focusId)||grid.firstElementChild||$('#addLib')).focus();
+  const list=libraryView(linkedRows,editing?'all':filter,favorites,lang,names);grid.replaceChildren(...list.map(g=>tile(g,false)));
+  const visiblePending=!editing&&(filter==='all'||filter==='epic')?pending:[];
+  grid.append(...visiblePending.map(pendingCard));
+  $('.empty').hidden=!!(list.length||visiblePending.length);$('.counter').textContent=libraryCount(list.length,visiblePending.length);
+  if(wasGrid&&!panel.open)([...grid.children].find(b=>focusFolder?b.dataset.epicFolder===focusFolder:b.dataset.id===focusId)||grid.firstElementChild||$('#addLib')).focus();
  }else{grid.replaceChildren();if(focus&&!current)$('#addEmpty').focus()}
 }
 function step(direction){
@@ -197,10 +228,19 @@ $('#previousGame').onclick=()=>step(-1);$('#nextGame').onclick=()=>step(1);
 function switchPage(value){library=value;editing=false;render(!value);if(value)$('#library').focus();persist()}
 $('#home').onclick=()=>switchPage(false);$('#library').onclick=()=>switchPage(true);$('#edit').onclick=()=>{editing=!editing;render()};
 
+const latestScan=new Map();
 async function loadSource(source){
+ const request=Symbol();latestScan.set(source,request);
  let report;
- try{report=await invoke('discover',{source})}catch(e){report={complete:false,warnings:[String(e)],items:[]}}
- reports.set(source,report);rows=mergeSource(rows,source,report);for(const item of report.items)artCache.delete(coverCacheKey(item.id));render();if(rows.some(g=>g.id===current&&(g.bucket??g.source)===source))background(true);persist();
+ const args={source};
+ if(source==='epic')args.linkedFolders=Object.keys(epicLinks).slice(0,256);
+ try{report=await invoke('discover',args)}catch(e){report={complete:false,warnings:[String(e)],items:[]}}
+ if(latestScan.get(source)!==request)return;
+ if(source==='manual'&&report.complete){
+  const ids=new Set(report.items.filter(g=>g.source==='epic').map(g=>g.id));
+  for(const [path,id] of Object.entries(epicLinks))if(!ids.has(id))delete epicLinks[path];
+ }
+ reports.set(source,report);rows=mergeSource(rows,source,report);clearCovers(new Set(report.items.map(item=>item.id)));render();if(rows.some(g=>g.id===current&&(g.bucket??g.source)===source))background(true);persist();
  if(modal==='settings'&&section==='sources')settingsBody(true);
 }
 async function scan(){
@@ -211,12 +251,19 @@ async function scan(){
 $('#scanEmpty').onclick=scan;
 function open(mode,title){
  if(!panel.open){origin=document.activeElement;panel.showModal()}
- modal=mode;$('#panelTitle').textContent=title;$('#alert').textContent='';content.replaceChildren();
+ modal=mode;panel.dataset.mode=mode;$('#panelTitle').textContent=title;$('#alert').textContent='';content.replaceChildren();
  $('#close').textContent=tr('close');panel.scrollTop=0;
 }
 function close(){
- if(!panel.open)return;panel.close();modal='';
- if(!library&&current&&(launchId===current||!origin?.isConnected)){select(current,true)}
+ if(!panel.open)return;panel.close();modal='';content.replaceChildren();
+ const folder=origin?.dataset.epicFolder;
+ const linked=folder&&epicLinks[folderKey(folder)];
+ const entry=origin?.dataset.id||linked;
+ const tileId=entry&&games.find(g=>g.id===entry||g.alias===entry)?.id;
+ const restored=(tileId&&(library?grid.querySelector('[data-id="'+CSS.escape(tileId)+'"]'):rail.querySelector('.sel')))||
+  (library&&folder&&grid.querySelector('[data-epic-folder="'+CSS.escape(folder)+'"]'));
+ if(restored){restored.focus({preventScroll:true});if(library)restored.scrollIntoView({block:'nearest',inline:'nearest'})}
+ else if(!library&&current&&(launchId===current||!origin?.isConnected)){select(current,true)}
  else if(origin?.isConnected)origin.focus();else (library?$('#library'):$('#home')).focus();
  settleRail();
 }
@@ -244,12 +291,12 @@ function settingsBody(keep=false){
    prefRow(tr('fullscreen'),toggle(fullscreen,async v=>{await nativeAction('fullscreen',v);fullscreen=v;persist()})));
   const onlineToggle=toggle(onlineArt,v=>{onlineArt=v;persist();render();settingsBody(true)});
   onlineToggle.dataset.control='onlineArt';body.append(prefRow(tr('onlineArt'),onlineToggle));
-  const game=games.find(g=>g.id===current);
-  if(game)backgroundSettings(body,game);
+
  }else if(section==='sources'){
   for(const s of platforms){
    const report=reports.get(s);const r=el('div','','scanRow');
-   r.append(el('span',platform(s)),el('span',count(rows.filter(x=>(x.bucket??x.source)===s).length)+' · '+tr(!report?'scanning':report.complete?'ready':'partial')));body.append(r);
+   const found=rows.filter(x=>(x.bucket??x.source)===s).length,pending=s==='epic'?pendingEpic().length:0;
+   r.append(el('span',platform(s)),el('span',libraryCount(found,pending)+' · '+tr(!report?'scanning':report.complete?'ready':'partial')));body.append(r);
    if(report?.warnings.length){const d=el('details'),summary=el('summary',tr('diagnostics'));d.append(summary,el('div',report.warnings.join('\n'),'faults'));body.append(d)}
   }
   body.append(el('h3',tr('epicFolders')),el('p',tr('epicFolderHelp'),'note'));
@@ -269,30 +316,83 @@ function settingsBody(keep=false){
   const addFolder=button(tr('addEpicFolder'),()=>changeFolder('add'));
   addFolder.dataset.control='addEpicFolder';addFolder.disabled=folderBusy||scanning;body.append(addFolder);
   const scanBtn=button(tr(scanning?'scanning':'scan'),scan);scanBtn.dataset.control='scan';scanBtn.disabled=scanning;
-  body.append(scanBtn,button(tr('add'),()=>addDialog()));
-  for(const m of rows.filter(x=>x.bucket==='manual')){
-   const r=el('div','','settingRow');r.append(el('span',m.name),button(tr('change'),()=>addDialog(m.id)),button(tr('remove'),()=>removeDialog(m)));body.append(r);
-  }
+  body.append(scanBtn);
  }else{
   body.append(prefRow(tr('login'),toggle(login,async v=>{await nativeAction('login',v);login=v})));
   const buttons=el('div','','buttons');for(const k of ['desktop','quit'])buttons.append(button(tr(k),()=>nativeAction(k).catch(error)));body.append(buttons);
  }
  if(key)content.querySelector('[data-control="'+CSS.escape(key)+'"]')?.focus();
 }
-function backgroundSettings(body,game){
+function editGame(game,trigger){
+ if(!game)return;
+ open('game',tr('gameEdit'));origin=trigger;
+ const main=el('section','','gameEditor'),header=el('div','','editorGame'),preview=el('div','','cover');
+ preview.style.setProperty('--hue',hue(game.id));preview.dataset.initials=[...game.name][0]||'';
+ const summary=el('div','','editorTitle');summary.append(el('small',platform(game.source)));header.append(preview,summary);
+ const title=el('label',tr('title'),'field'),name=el('input');
+ name.type='text';name.maxLength=180;name.value=game.name;title.append(name);
+ const status=el('p','','note');status.setAttribute('role','status');
+ const nameActions=el('div','','buttons');
+ const original=game.originalName||game.name;
+ function saveName(value){
+  if(!value){name.focus();return}
+  if(game.alias)delete names[game.alias];
+  if(value===original)delete names[game.id];else names[game.id]=value;
+  name.value=value;
+  resetName.hidden=value===original;const saved=persist();render();status.textContent=saved?tr('savedEdit'):'';
+ }
+ const resetName=button(tr('resetName'),()=>saveName(original));resetName.hidden=name.value===original;
+ const save=button(tr('saveName'),()=>saveName(name.value.trim()));
+ name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();save.click()}};
+ nameActions.append(save,resetName);
+ const art=el('section','','editorCover'),files=el('label',tr('chooseCover'),'filePicker');
+ const input=el('input');input.type='file';input.accept='image/png,image/jpeg,image/webp';files.append(input);
+ const reset=button(tr('resetCover'),()=>changeCover(null));reset.hidden=true;
+ let lastPreview;
+ async function refresh(){
+  const request=lastPreview=coverArt(game.id),url=await request;
+  if(!main.isConnected||lastPreview!==request)return;
+  preview.replaceChildren();preview.classList.remove('hasArt');preview.style.removeProperty('--tint');
+  if(url){
+   const image=new Image();image.alt='';image.onload=()=>{if(preview.contains(image))fitCover(preview,image)};image.src=url;preview.append(image);
+  }
+ }
+ async function changeCover(file){
+  input.disabled=reset.disabled=true;status.textContent='';
+  try{
+   const data=file?await importCover(file):null;
+   if(!main.isConnected)return;
+   await writeCover(game.id,game.alias,data);
+   clearCovers(new Set([game.id,game.alias]));render();
+   if(game.id===current)background(true);
+   if(main.isConnected){reset.hidden=!data;refresh();status.textContent=tr('savedEdit')}
+  }catch{status.textContent=tr(file?'coverError':'storage')}
+  finally{input.disabled=reset.disabled=false;input.value=''}
+ }
+ input.onchange=()=>{if(input.files[0])changeCover(input.files[0])};
+ const coverActions=el('div','','buttons');coverActions.append(files,reset);art.append(el('h3',tr('cover')),coverActions);
+ summary.append(title,nameActions);main.append(header,art,status);content.append(main);
+ refresh();readCover(game.id,game.alias).then(data=>{if(data&&main.isConnected)reset.hidden=false}).catch(()=>{});
+ backgroundSettings(main,game,refresh);
+ const manual=rows.find(row=>row.bucket==='manual'&&(row.id===game.id||row.id===game.alias));
+ if(manual){const actions=el('div','','buttons');actions.append(button(tr('change'),()=>addDialog(manual.id)),button(tr('remove'),()=>removeDialog(manual)));main.append(actions)}
+ name.focus({preventScroll:true});
+}
+$('#gameOptions').onclick=()=>editGame(games.find(g=>g.id===current),$('#gameOptions'));
+function backgroundSettings(body,game,refresh){
  const group=el('section','','backgroundSettings'), results=el('div','','appList');
  const status=el('p','','note');status.setAttribute('role','status');
  const field=el('label',tr('heroUrl'),'field'),input=document.createElement('input');
  input.type='url';input.placeholder='https://cdn2.steamgriddb.com/hero/…';field.append(input);
  const searchField=el('label',tr('steamTitle'),'field'),query=document.createElement('input');
  query.type='text';query.maxLength=180;query.value=game.name;searchField.append(query);
- group.append(el('h3',tr('gameBackground')+' · '+game.name),searchField);body.append(group);
+ group.append(el('h3',tr('gameBackground')));body.append(group);
  const actions=el('div','','buttons');
- const find=button(tr('findSteam'),async()=>{
+ const find=button(tr('search'),async()=>{
   find.disabled=true;results.replaceChildren();status.textContent=tr('loading');
   try{
    const hits=await invoke('search_backgrounds',{title:query.value.trim(),lang});
-   if(!group.isConnected)return;
+   if(!group.isConnected||!panel.open)return;
    status.textContent=tr(hits.length?'selectEdition':'noMatches');
    for(const hit of hits)results.append(button(hit.name+' · '+hit.id,()=>link('steam:'+hit.id)));
    results.firstElementChild?.focus();
@@ -308,39 +408,50 @@ function backgroundSettings(body,game){
   group.inert=true;status.textContent=tr('loading');
   try{
    const image=await decodeBackground(await invoke('online_background',{source,online:onlineArt}),source.startsWith('steam:'));
-   if(!group.isConnected||!panel.open||current!==game.id)return;
+   if(!group.isConnected||!panel.open||modal!=='game')return;
    if(!image){status.textContent=tr('artUnavailable');return}
    if(game.alias)delete artSources[game.alias];artSources[game.id]=source;
-   persist();render();settingsBody();
+   persist();render();refresh();group.remove();backgroundSettings(body,game,refresh);
    content.querySelector('[data-control="resetArt"]')?.focus();
   }catch{status.textContent=tr('artUnavailable')}finally{group.inert=false}
  }
  find.disabled=!onlineArt;apply.disabled=!onlineArt;
- group.append(find,results,field);actions.append(apply);group.append(actions,status);
+ const advanced=el('details');advanced.append(el('summary',tr('moreArtwork')),field,apply);
+ const steam=el('details'),expand=el('summary',tr('findSteam'));
+ expand.dataset.control='findArt';steam.append(expand,searchField,find,results);
+ group.append(steam,advanced,actions,status);
  if(artSources[game.id]||artSources[game.alias]){
   const reset=button(tr('resetArt'),()=>{
    delete artSources[game.id];if(game.alias)delete artSources[game.alias];
-   persist();render();settingsBody();content.querySelector('[data-control="findArt"]')?.focus();
+   persist();render();refresh();group.remove();backgroundSettings(body,game,refresh);content.querySelector('[data-control="findArt"]')?.focus();
   });reset.dataset.control='resetArt';actions.append(reset);
  }
- find.dataset.control='findArt';
+
 }
 $('#settings').onclick=()=>{open('settings',tr('settings'));settingsBody();content.querySelector('.categories [aria-pressed=true]').focus()};
 function removeDialog(m){
  open('remove',tr('removeConfirm'));content.append(el('p',m.name),el('p',tr('localOnly')),button(tr('remove'),async()=>{
-  try{await invoke('remove_manual',{id:m.id});await loadSource('manual');open('settings',tr('settings'));settingsBody();$('#close').focus()}catch(e){error(e)}
+  try{await invoke('remove_manual',{id:m.id});await loadSource('manual');close()}catch(e){error(e)}
  }));
  $('#close').focus();
 }
-function addDialog(previous=null){
- open('add',tr(previous?'change':'add'));replaceId=previous;draft=null;selectedApps=[];
- content.append(el('p',tr('manualHelp'),'note'));
+function addDialog(previous=null,folder=null){
+ open('add',tr(folder?'connectShortcut':previous?'change':'add'));replaceId=previous;draft=null;selectedApps=[];
+ content.append(el('p',tr(folder?'connectHelp':'manualHelp'),'note'));
+ if(folder)content.append(el('p',folder,'faults'));
  const actions=el('div','','buttons'),picker=button(tr('shortcut'),async()=>{
-  try{const row=await invoke('pick_shortcut');if(row&&modal==='add'){draft={kind:'shortcut',id:row.id,name:row.name};manualForm()}}catch(e){error(e)}
+  picker.disabled=true;
+  try{
+   const row=await invoke('pick_shortcut');
+   if(row&&panel.open&&picker.isConnected){
+    if(folder&&/^(steam|xbox):/.test(row.id)){$('#alert').textContent=tr('epicShortcutOnly');return}
+    draft={kind:'shortcut',id:row.id,name:row.name};manualForm(folder)
+   }
+  }catch(e){if(panel.open&&picker.isConnected)error(e)}finally{picker.disabled=false}
  });
  const apps=button(tr('applications'),async()=>{
-  apps.disabled=true;try{selectedApps=await invoke('registered_apps');if(modal==='add')appsList()}catch(e){error(e)}finally{apps.disabled=false}
- });actions.append(picker,apps);content.append(actions);picker.focus();
+  apps.disabled=true;try{const items=await invoke('registered_apps');if(panel.open&&apps.isConnected){selectedApps=items;appsList()}}catch(e){if(panel.open&&apps.isConnected)error(e)}finally{apps.disabled=false}
+ });actions.append(picker);if(!folder)actions.append(apps);content.append(actions);picker.focus();
 }
 function appsList(){
  content.replaceChildren();const search=document.createElement('input');search.id='search';search.ariaLabel=tr('appFilter');search.placeholder=tr('appFilter');
@@ -349,18 +460,28 @@ function appsList(){
  list.replaceChildren(...match.map(x=>button(x.name,()=>{draft={kind:'app',id:x.id,name:x.name};manualForm()},'')));if(!match.length)list.textContent=tr('appsEmpty')}
  search.oninput=draw;draw();search.focus();
 }
-function manualForm(){
+function manualForm(folder=null){
  const old=rows.find(g=>g.id===replaceId&&g.bucket==='manual');content.replaceChildren();
- const name=document.createElement('input');name.value=old?.name||draft.name;name.maxLength=180;
+ const name=document.createElement('input');name.value=folder?folderName(folder):old?.name||draft.name;name.maxLength=180;
  const src=document.createElement('select');for(const s of platforms){const o=el('option',platform(s));o.value=s;src.append(o)}
- src.value=old?.source||({app:'xbox'}[draft.kind])||platforms.find(s=>draft.id.startsWith(s+':'))||'manual';
+ src.value=folder?'epic':old?.source||({app:'xbox'}[draft.kind])||platforms.find(s=>draft.id.startsWith(s+':'))||'manual';src.disabled=!!folder;
  const nameRow=el('label',tr('title'),'field'),srcRow=el('label',tr('platform'),'field');nameRow.append(name);srcRow.append(src);
  const save=button(tr('save'),async()=>{
-  save.disabled=true;try{await invoke('save_manual',{...draft,name:name.value,source:src.value,previous:replaceId});await loadSource('manual');close()}
-  catch(e){error(e)}finally{save.disabled=false}
+  const entry={...draft,name:name.value,source:src.value,previous:replaceId},key=folder&&folderKey(folder);
+  if(folder&&!pendingEpic().some(p=>folderKey(p)===key)){error(tr('folderChanged'));return}
+  if(folder&&Object.entries(epicLinks).some(([path,id])=>path!==key&&id===entry.id)){error(tr('shortcutInUse'));return}
+  save.disabled=true;try{
+   await invoke('save_manual',entry);
+   if(folder)epicLinks[key]=entry.id;
+   else if(entry.previous)for(const [path,id] of Object.entries(epicLinks)){
+    if(id===entry.previous){if(entry.source==='epic')epicLinks[path]=entry.id;else delete epicLinks[path]}
+   }
+   await loadSource('manual');if(save.isConnected&&panel.open)close();
+  }catch(e){if(panel.open&&save.isConnected)error(e)}finally{save.disabled=false}
  });content.append(nameRow,srcRow,save);name.focus();
 }
-$('#addEmpty').onclick=$('#addLib').onclick=()=>addDialog();
+$('#addLib').onclick=()=>addDialog();
+$('#addEmpty').onclick=()=>{if(pendingEpic().length){filter='epic';switchPage(true);grid.querySelector('[data-epic-folder]')?.focus()}else addDialog()};
 function launchView(){
  if(modal!=='launch')return;
  const game=games.find(g=>g.id===launchId);
@@ -409,7 +530,16 @@ function present(){
 }
 function navigate(key){
  const active=document.activeElement;
+ if(key==='ContextMenu'&&!panel.open){
+  const target=active.closest('.tile,.card')||(!library&&rail.querySelector('.sel'));
+  if(target?.dataset.id){editGame(games.find(g=>g.id===target.dataset.id),target);return true}
+ }
  if(key==='Escape'){if(panel.open)close();else switchPage(false);return true}
+ if(modal==='game'&&['ArrowUp','ArrowDown'].includes(key)){
+  const controls=[...panel.querySelectorAll('button:enabled,input:enabled,summary')].filter(e=>e.checkVisibility()&&!e.closest('[inert]'));
+  const next=controls.indexOf(active)+(key==='ArrowDown'?1:-1);
+  controls[Math.max(0,Math.min(controls.length-1,next))]?.focus();return true;
+ }
  if(active.matches('input:not([type=checkbox]),select')&&!['Escape','ArrowDown'].includes(key))return false;
  if(!panel.open&&!library&&current&&((active===$('#play')&&key==='ArrowUp')||(active===$('#home')&&key==='ArrowDown'))){select(current,true);return true}
  if(!panel.open&&!library&&(rail.contains(active)||active===document.body)&&current){
@@ -429,7 +559,7 @@ function navigate(key){
 document.addEventListener('keydown',e=>{
  if(skipKeys.has(e.code)){e.preventDefault();return}
  if(!intro.hidden){dismissIntro();if(['Enter',' ','Escape'].includes(e.key)){skipKeys.add(e.code);e.preventDefault();return}}
- if(e.repeat&&e.key==='Enter'){e.preventDefault();return}if(navigate(e.key))e.preventDefault()});
+ if(e.repeat&&e.key==='Enter'){e.preventDefault();return}if(navigate(e.key==='F10'&&e.shiftKey?'ContextMenu':e.key))e.preventDefault()});
 document.addEventListener('keyup',e=>{if(skipKeys.delete(e.code))e.preventDefault()});
 window.addEventListener('blur',()=>skipKeys.clear());
 let last=new Set(),repeatAt=0;
@@ -437,7 +567,7 @@ setInterval(()=>{
  if(document.hidden||!document.hasFocus()){last.clear();return}
  let pad;try{pad=Array.from(navigator.getGamepads?.()||[]).find(p=>p?.mapping==='standard')}catch{return}
  if(hasPad!==!!pad){hasPad=!!pad;hints()}if(!pad){last.clear();return}
- const keys=new Set();for(const [n,k] of [[12,'ArrowUp'],[13,'ArrowDown'],[14,'ArrowLeft'],[15,'ArrowRight'],[0,'Enter'],[1,'Escape']])if(pad.buttons[n]?.pressed)keys.add(k);
+ const keys=new Set();for(const [n,k] of [[12,'ArrowUp'],[13,'ArrowDown'],[14,'ArrowLeft'],[15,'ArrowRight'],[0,'Enter'],[1,'Escape'],[9,'ContextMenu']])if(pad.buttons[n]?.pressed)keys.add(k);
  const [x,y]=pad.axes;if(Math.abs(x)>.65&&Math.abs(x)>Math.abs(y))keys.add(x<0?'ArrowLeft':'ArrowRight');else if(Math.abs(y)>.65)keys.add(y<0?'ArrowUp':'ArrowDown');
  if(!intro.hidden&&keys.size){
   dismissIntro();

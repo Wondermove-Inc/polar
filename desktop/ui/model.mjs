@@ -6,6 +6,10 @@ const labels = {
   heroOriginal:['SteamGridDB에서 Hero 원본 이미지 주소를 복사하세요.','Copy the original Hero image address from SteamGridDB.'],
   artUnavailable:['고해상도 배경을 불러오지 못했습니다. 연결과 원본 크기(최소 1920×1080)를 확인하세요.','Could not load an HD background. Check your connection and the original dimensions (at least 1920×1080).'],
   resetArt:['기본 배경으로 복원','Restore default background'],
+  search:['검색','Search'],gameEdit:['게임 편집','Edit game'],saveName:['이름 저장','Save name'],resetName:['기본 이름으로 복원','Restore default name'],
+  cover:['표지','Cover'],chooseCover:['표지 사진 선택','Choose cover image'],resetCover:['기본 표지로 복원','Restore default cover'],
+  coverError:['12MB 이하의 JPG, PNG 또는 WebP 사진을 선택하세요.','Choose a JPG, PNG or WebP image up to 12 MB.'],
+  savedEdit:['저장했습니다.','Saved.'], moreArtwork:['이미지 주소로 배경 지정','Use a background image URL'],
   previousGame:['이전 게임','Previous game'],nextGame:['다음 게임','Next game'],
   epicFolders:['추가한 Epic Games 폴더','Additional Epic Games folders'],addEpicFolder:['Epic 게임 폴더 추가','Add Epic games folder'],
   removeFolder:['폴더 연결 해제','Remove folder'],epicFolderHelp:['각 드라이브의 Epic Games 폴더를 자동으로 확인합니다. 다른 위치에 설치했다면 게임 폴더나 상위 폴더를 추가하세요.','Polar checks the Epic Games folder on each local drive. For other locations, add a game folder or its parent.'],
@@ -35,6 +39,13 @@ const labels = {
   localOnly:['목록에서 제거해도 게임 파일은 보존됩니다.','Removing an entry keeps the installed game files.'],
   selectGame:['게임을 선택하세요','Select a game'], manualHelp:['기존 게임 바로가기(.lnk, .url) 또는 Windows에 등록된 앱을 선택하세요.','Choose an existing game shortcut (.lnk, .url) or a registered Windows app.'],
   appsEmpty:['일치하는 앱이 없습니다.','No matching apps.'], diagnostics:['탐색 세부 정보','Scan details'],
+  foundEpicFolder:['Epic 게임 설치 폴더를 찾았습니다','Epic game folders found'],
+  pendingEpicCount:['바로가기 연결 대기 {n}개','{n} to connect'],
+  connectEpic:['Epic 게임 바로가기 연결','Connect Epic Games shortcut'],connectShortcut:['바로가기 연결','Connect shortcut'],
+  connectHelp:['게임 폴더에서 실행 정보를 읽지 못했습니다. Epic Games에서 만든 이 게임의 바로가기를 선택하세요.','Polar could not read the launch information from the game folder. Choose the shortcut Epic Games created for this game.'],
+  folderChanged:['폴더 상태가 변경되었습니다. 라이브러리에서 다시 선택하세요.','This folder has changed. Select it again in the library.'],
+  shortcutInUse:['이 바로가기는 다른 게임 폴더에 연결되어 있습니다.','This shortcut is already connected to another game folder.'],
+  epicShortcutOnly:['다른 플랫폼의 바로가기입니다. Epic 게임의 바로가기를 선택하세요.','That shortcut belongs to another platform. Choose this Epic game’s shortcut.'],
   platformOpen:['원래 런처 열기','Open launcher']
 };
 for(const [key,[ko,en]] of Object.entries(labels)){words.ko[key]=ko;words.en[key]=en}
@@ -49,7 +60,7 @@ export function mergeSource(previous,source,report){
   for(const item of report.items)rows.set(source+'|'+item.id,{...item,bucket:source,unconfirmed:false});
   return [...rows.values()];
 }
-export function libraryView(items,filter,favorites,locale='en'){
+export function libraryView(items,filter,favorites,locale='en',names={}){
   const artifacts=new Map();
   for(const game of items){
     if((game.bucket??game.source)!=='epic'||!game.id.startsWith('epic:')||game.unconfirmed)continue;
@@ -64,6 +75,9 @@ export function libraryView(items,filter,favorites,locale='en'){
     const prior=merged.get(game.id);
     if(!prior||game.bucket==='manual'||prior.bucket!=='manual')merged.set(game.id,game);
   }
-  return [...merged.values()].filter(item=>filter==='all'||filter===item.source||(filter==='favorites'&&(favorites.includes(item.id)||favorites.includes(item.alias))))
+  return [...merged.values()].map(game=>{
+    const name=names[game.id]||names[game.alias];
+    return typeof name==='string'&&name?{...game,originalName:game.name,name}:game;
+  }).filter(item=>filter==='all'||filter===item.source||(filter==='favorites'&&(favorites.includes(item.id)||favorites.includes(item.alias))))
     .sort((a,b)=>a.name.localeCompare(b.name,locale)||a.id.localeCompare(b.id));
 }

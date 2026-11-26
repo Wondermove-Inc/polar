@@ -197,3 +197,95 @@ fn steam_supplies_a_native_panorama_and_portrait_when_local_art_is_missing() {
         );
     }
 }
+
+#[test]
+fn uses_the_matching_steam_store_items_hashed_portrait_and_caches_it_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let expected = format!(
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3280350/{HASH}/library_capsule_2x.jpg"
+    );
+    let documents = serde_json::json!({"response":{"store_items":[
+        {"appid":42,"assets":{"library_capsule_2x":"library_600x900_2x.jpg"}},
+        {"appid":3280350,"assets":{"library_capsule_2x":format!("{HASH}/library_capsule_2x.jpg")}}
+    ]}});
+    let mut encoded = Cursor::new(Vec::new());
+    image::GrayImage::new(600, 900)
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let get = |url: &str, _: usize| {
+        if url.starts_with("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/") {
+            let request = url::Url::parse(url).unwrap();
+            let payload: serde_json::Value = serde_json::from_str(
+                &request
+                    .query_pairs()
+                    .find(|(k, _)| k == "input_json")
+                    .unwrap()
+                    .1,
+            )
+            .unwrap();
+            assert_eq!(payload["ids"][0]["appid"], 3280350);
+            assert_eq!(payload["data_request"]["include_assets"], true);
+            return Ok(serde_json::to_vec(&documents).unwrap());
+        }
+        assert_eq!(url, expected);
+        Ok(encoded.get_ref().clone())
+    };
+    let source = Source::Cover(3280350);
+    assert!(resolve(dir.path(), &source, true, &get).unwrap().is_some());
+    assert!(
+        resolve(dir.path(), &source, false, &|_, _| panic!(
+            "offline network"
+        ))
+        .unwrap()
+        .is_some()
+    );
+}
+
+#[test]
+fn invalid_cover_metadata_can_only_fall_back_to_the_same_games_standard_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = serde_json::json!({"response":{"store_items":[
+        {"appid":99,"assets":{"library_capsule":"library_capsule.jpg"}},
+        {"appid":20,"assets":{"library_capsule_2x":"../99/library_600x900.jpg",
+                                     "library_capsule":"https://example.com/library_capsule.jpg"}}
+    ]}});
+    let get = |url: &str, _: usize| {
+        if url.starts_with("https://api.steampowered.com/") {
+            return Ok(serde_json::to_vec(&doc).unwrap());
+        }
+        let prefix = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/20/";
+        assert!(matches!(
+            url.strip_prefix(prefix),
+            Some("library_600x900_2x.jpg" | "library_600x900.jpg")
+        ));
+        Err("unavailable".into())
+    };
+    assert!(
+        resolve(dir.path(), &Source::Cover(20), true, &get)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+#[ignore = "retrieves the publisher's current capsule from Steam"]
+fn live_covers_for_reported_missing_posters() {
+    use polar_desktop::pictures::download;
+    let dir = tempfile::tempdir().unwrap();
+    for app in [3280350, 4128400] {
+        assert!(
+            resolve(dir.path(), &Source::Cover(app), true, &download)
+                .unwrap()
+                .is_some(),
+            "{app}"
+        );
+        let dimensions = image::ImageReader::open(dir.path().join(format!("cover-{app}.art")))
+            .unwrap()
+            .with_guessed_format()
+            .unwrap()
+            .into_dimensions()
+            .unwrap();
+        assert_eq!(dimensions, (600, 900));
+        eprintln!("{app}: {} x {}", dimensions.0, dimensions.1);
+    }
+}

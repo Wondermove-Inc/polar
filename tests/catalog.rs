@@ -263,3 +263,205 @@ fn epic_independent_install_records_survive_stale_and_unreadable_siblings() {
         assert_eq!(scan().items.len(), 1);
     }
 }
+
+#[test]
+fn epic_v2_journal_replays_last_state_and_resolves_the_real_install_folder() {
+    let tmp = tempdir().unwrap();
+    let drive = tmp.path().join("D");
+    let game = drive.join("Epic Games/DeathStranding");
+    let store = game.join(".egstore");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(store.join("75E63.manifest"), b"binary chunk manifest").unwrap();
+    fs::write(game.join("DeathStranding.exe"), b"game").unwrap();
+    let data = tmp.path().join("ProgramData/Epic");
+    let journal = tmp
+        .path()
+        .join("profile/com.epicgames.eglv2/installations.jsonl");
+    fs::create_dir_all(journal.parent().unwrap()).unwrap();
+    let header = serde_json::json!({"version":1,"writtenAt":"2026-11-14T16:25:27Z","entries":0});
+    let row = |complete| serde_json::json!({"installationId":"75E63","complete":complete,"dir":game,"platform":"Windows","namespace":"ns","itemId":"it","artifactId":"DS","launchExecutable":"DeathStranding.exe","launchCommand":"","tags":[""]});
+    let scan = || {
+        polar::catalog::epic_installations_with_journals(
+            &data,
+            std::slice::from_ref(&drive),
+            std::slice::from_ref(&game),
+            std::slice::from_ref(&journal),
+        )
+    };
+    fs::write(
+        &journal,
+        format!(
+            "\u{feff}{header}\r\n{}\r\n{{oops\n{}\n",
+            row(false),
+            row(true)
+        ),
+    )
+    .unwrap();
+    let report = scan();
+    assert!(!report.complete);
+    assert_eq!(report.items.len(), 1);
+    assert_eq!(report.items[0].name, "DeathStranding");
+    assert_eq!(report.items[0].root, game);
+    assert_eq!(
+        report.items[0].target,
+        "com.epicgames.launcher://apps/ns%3Ait%3ADS?action=launch&silent=true"
+    );
+    assert!(report.unresolved_epic.is_empty());
+
+    // A stale classic manifest and a .mancpn must not revive an in-progress v2 update.
+    let old = data.join("EpicGamesLauncher/Data/Manifests");
+    fs::create_dir_all(&old).unwrap();
+    fs::write(old.join("old.item"), serde_json::json!({"DisplayName":"Old","InstallLocation":game,"CatalogItemId":"it","CatalogNamespace":"ns","AppName":"DS","LaunchExecutable":"DeathStranding.exe"}).to_string()).unwrap();
+    fs::write(
+        store.join("75E63.mancpn"),
+        r#"{"CatalogItemId":"it","CatalogNamespace":"ns","AppName":"DS"}"#,
+    )
+    .unwrap();
+    for latest in [
+        row(false),
+        serde_json::json!({"installationId":"75E63","deleted":true}),
+    ] {
+        fs::write(&journal, format!("{header}\n{}\n{latest}\n", row(true))).unwrap();
+        let report = scan();
+        assert!(report.items.is_empty());
+        assert!(report.unresolved_epic.is_empty());
+    }
+}
+
+#[test]
+fn epic_orphan_install_can_be_linked_without_launching_the_visible_executable() {
+    let tmp = tempdir().unwrap();
+    let drive = tmp.path().join("D");
+    let game = drive.join("Epic Games/DeathStranding");
+    let store = game.join(".egstore");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(game.join("DeathStranding.exe"), b"game").unwrap();
+    let unrelated = drive.join("Epic Games/Unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::write(unrelated.join("Unrelated.exe"), b"no marker").unwrap();
+    let scan = || {
+        polar::catalog::epic_installations(
+            tmp.path(),
+            std::slice::from_ref(&drive),
+            std::slice::from_ref(&game),
+        )
+    };
+    let report = scan();
+    assert!(report.items.is_empty());
+    assert_eq!(report.unresolved_epic, [game.to_string_lossy()]);
+    assert!(!report.complete);
+    assert!(report.warnings.iter().any(|s| s.contains("DeathStranding")));
+    fs::write(store.join("old.mancpn"), "{").unwrap();
+    fs::write(store.join("old.manifest"), b"old manifest").unwrap();
+    let damaged = scan();
+    assert!(damaged.items.is_empty());
+    assert_eq!(damaged.unresolved_epic, [game.to_string_lossy()]);
+    fs::create_dir(store.join("Pending")).unwrap();
+    fs::write(store.join("Pending/updating"), b"partial").unwrap();
+    assert!(scan().unresolved_epic.is_empty());
+}
+
+#[test]
+fn epic_removed_journal_entry_does_not_hide_a_new_game_reusing_the_folder() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("Reused");
+    fs::create_dir(&root).unwrap();
+    let journals = [tmp.path().join("installations.jsonl")];
+    let old = serde_json::json!({"installationId":"old","complete":false,"dir":root,"namespace":"ns","itemId":"old","artifactId":"old"});
+    fs::write(&journals[0], old.to_string()).unwrap();
+    let folder = tmp.path().join("EpicGamesLauncher/Data/Manifests");
+    fs::create_dir_all(&folder).unwrap();
+    for id in ["old", "new"] {
+        let record = serde_json::json!({"DisplayName":id,"InstallLocation":root,"AppName":id,"CatalogItemId":id,"CatalogNamespace":"ns","LaunchExecutable":"Go.exe"});
+        fs::write(folder.join(format!("{id}.item")), record.to_string()).unwrap();
+    }
+    let report = polar::catalog::epic_installations_with_journals(tmp.path(), &[], &[], &journals);
+    assert_eq!(
+        report
+            .items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        ["new"]
+    );
+}
+
+#[test]
+fn epic_reports_only_unique_confirmed_identities_for_requested_linked_folders() {
+    use polar::catalog::Item;
+    use std::path::PathBuf;
+    let roots = [
+        r"D:\Epic Games\DeathStranding",
+        r"E:\Games\Ambiguous",
+        r"e:/games/ambiguous/",
+    ];
+    let mut report = polar::catalog::Report::ok();
+    for (index, root) in roots.iter().enumerate() {
+        report.items.push(Item {
+            id: format!("epic:ns:item:{index}"),
+            name: format!("Game {index}"),
+            source: "epic".into(),
+            root: PathBuf::from(root),
+            target: String::new(),
+            hero: None,
+            cover: None,
+        });
+    }
+    let requested = [
+        "d:/epic games/Deathstranding/",
+        "E:/Games/Ambiguous",
+        "relative",
+        "D:/Epic Games",
+    ];
+    report.match_epic_links(&requested.map(str::to_owned));
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        json["resolvedEpic"],
+        serde_json::json!({requested[0]:"epic:ns:item:0"})
+    );
+    let mut oversized = vec![String::from("unmatched"); 256];
+    oversized.push(requested[0].into());
+    report.match_epic_links(&oversized);
+    assert!(report.resolved_epic.is_empty());
+}
+
+#[test]
+fn epic_engine_metadata_never_creates_a_game_shortcut_prompt() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("D/Epic Games/UE_5.8");
+    let store = root.join(".egstore");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(store.join("ue.manifest"), b"manifest").unwrap();
+    let journal = tmp.path().join("installations.jsonl");
+    let manifests = tmp.path().join("EpicGamesLauncher/Data/Manifests");
+    fs::create_dir_all(&manifests).unwrap();
+    let record = serde_json::json!({"AppName":"UE_5.8","CatalogNamespace":"ue","CatalogItemId":"engine","InstallLocation":root,"DisplayName":"Unreal Engine"});
+    let index = tmp
+        .path()
+        .join("UnrealEngineLauncher/LauncherInstalled.dat");
+    fs::create_dir_all(index.parent().unwrap()).unwrap();
+    let legacy = serde_json::json!({"InstallationList":[{"InstallLocation":root,"NamespaceId":"ue","ArtifactId":"UE_5.8","ItemId":"engine"}]});
+    let v2 = serde_json::json!({"installationId":"engine","complete":true,"namespace":"ue","itemId":"engine","artifactId":"UE_5.8","dir":root});
+    let scan = || {
+        polar::catalog::epic_installations_with_journals(
+            tmp.path(),
+            &[tmp.path().join("D")],
+            &[],
+            std::slice::from_ref(&journal),
+        )
+    };
+    for (file, json) in [
+        (store.join("ue.mancpn"), &record),
+        (manifests.join("ue.item"), &record),
+        (journal.clone(), &v2),
+        (index, &legacy),
+    ] {
+        fs::write(&file, json.to_string()).unwrap();
+        let report = scan();
+        assert!(
+            report.items.is_empty() && report.unresolved_epic.is_empty() && report.complete,
+            "{file:?}: {report:?}"
+        );
+        fs::remove_file(file).unwrap();
+    }
+}

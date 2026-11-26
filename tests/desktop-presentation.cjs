@@ -71,10 +71,10 @@ const {chromium}=require('playwright');
     for(let i=0;i<3;i++){
      const box=tiles.nth(i);
      await box.locator('img').waitFor({timeout:3000});
-     if(view==='home'){
+     {
       const aspect=await box.evaluate(box=>{const img=box.querySelector('img'),r=box.getBoundingClientRect();
        return {frame:r.width/r.height,art:img.naturalWidth/img.naturalHeight}});
-      assert(Math.abs(aspect.frame-aspect.art)<.02,'home frame must follow cover '+JSON.stringify(aspect));
+      assert(Math.abs(aspect.frame-2/3)<.02,'every frame must be 2:3 '+JSON.stringify(aspect));
      }
      const info=await box.evaluate(box=>{
       const img=box.querySelector('img'),outer=box.getBoundingClientRect(),r=img.getBoundingClientRect(),s=getComputedStyle(img);
@@ -95,6 +95,11 @@ const {chromium}=require('playwright');
      return b.left>=4&&b.right<=innerWidth-4&&p.left>=0&&p.bottom<=innerHeight&&document.querySelector('footer').getBoundingClientRect().bottom<=innerHeight+.5;
     },null,{timeout:3000});
    }
+   const options=await page.locator('#gameOptions').evaluate(e=>{
+    const r=e.getBoundingClientRect(),p=document.querySelector('#play').getBoundingClientRect();
+    return {ratio:r.width/r.height,width:e.offsetWidth,height:e.offsetHeight,gap:r.left-p.right};
+   });
+   assert(Math.abs(options.ratio-1)<.01&&options.width===40&&options.height===40&&options.gap>=8,JSON.stringify(options));
    await page.keyboard.press('ArrowDown');assert(await page.locator('#play').evaluate(e=>e===document.activeElement));
    await page.keyboard.press('ArrowUp');assert(await page.locator('.tile.sel').evaluate(e=>e===document.activeElement));
    await page.locator('#home').focus();await page.keyboard.press('ArrowDown');

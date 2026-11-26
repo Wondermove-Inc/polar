@@ -164,7 +164,32 @@ pub fn source(name: &str) -> Report {
                 .collect();
             let mut parents = local_drives();
             parents.extend(std::env::var_os("ProgramFiles").map(PathBuf::from));
-            let mut report = polar::catalog::epic_installations(&data, &parents, &custom);
+            parents.extend(std::env::var_os("USERPROFILE").map(PathBuf::from));
+            let published = RegKey::predef(HKEY_CURRENT_USER)
+                .open_subkey(r"Software\Epic Games\EpicGamesLauncher")
+                .and_then(|key| key.get_value::<String, _>("AppDataPath"));
+            let mut journals = Vec::new();
+            if let Ok(path) = &published {
+                let path = Path::new(path);
+                if path.is_absolute() {
+                    journals.push(path.join("installations.jsonl"));
+                }
+            }
+            if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+                let path = PathBuf::from(local).join("com.epicgames.eglv2/installations.jsonl");
+                if !journals.contains(&path) {
+                    journals.push(path);
+                }
+            }
+            let mut report = polar::catalog::epic_installations_with_journals(
+                &data, &parents, &custom, &journals,
+            );
+            if let Err(e) = published
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                report.complete = false;
+                report.warnings.push(format!("Epic AppDataPath: {e}"));
+            }
             if let Err(error) = folders {
                 report.complete = false;
                 report.warnings.push(error);

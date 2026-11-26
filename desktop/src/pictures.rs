@@ -103,6 +103,54 @@ pub fn screenshot_urls(app: u32, doc: &Value) -> Vec<String> {
     urls
 }
 
+fn store_cover_urls(id: u32, get: &impl Fn(&str, usize) -> Result<Vec<u8>, String>) -> Vec<String> {
+    let query = serde_json::json!({
+        "ids": [{"appid": id}],
+        "context": {"language": "english", "country_code": "US"},
+        "data_request": {"include_assets": true}
+    });
+    let mut api =
+        Url::parse("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/").unwrap();
+    api.query_pairs_mut()
+        .append_pair("input_json", &query.to_string());
+    let Some(doc) = get(api.as_str(), MIB)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+    else {
+        return vec![];
+    };
+    let Some(item) = doc["response"]["store_items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|i| i["appid"] == id))
+    else {
+        return vec![];
+    };
+    let assets = &item["assets"];
+    let mut urls = Vec::new();
+    for key in ["library_capsule_2x", "library_capsule"] {
+        let Some(path) = assets[key].as_str() else {
+            continue;
+        };
+        let name = match path.split_once('/') {
+            Some((dir, name)) if hex(dir, 40) => name,
+            None => path,
+            _ => continue,
+        };
+        if matches!(
+            name,
+            "library_capsule_2x.jpg"
+                | "library_capsule.jpg"
+                | "library_600x900_2x.jpg"
+                | "library_600x900.jpg"
+        ) {
+            urls.push(format!(
+                "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{id}/{path}"
+            ));
+        }
+    }
+    urls
+}
+
 pub fn download(url: &str, limit: usize) -> Result<Vec<u8>, String> {
     static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
         ureq::Agent::config_builder()
@@ -317,10 +365,14 @@ pub fn resolve(
     if best.is_none() {
         let urls = match source {
             Source::Steam(id) => vec![asset(*id, "library_hero_2x"), asset(*id, "library_hero")],
-            Source::Cover(id) => vec![
-                asset(*id, "library_600x900_2x"),
-                asset(*id, "library_600x900"),
-            ],
+            Source::Cover(id) => {
+                let mut urls = store_cover_urls(*id, get);
+                urls.extend([
+                    asset(*id, "library_600x900_2x"),
+                    asset(*id, "library_600x900"),
+                ]);
+                urls
+            }
             Source::Hero(name) => vec![format!("{HERO_PREFIX}{name}")],
         };
         best = urls

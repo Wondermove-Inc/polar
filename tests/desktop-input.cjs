@@ -37,6 +37,8 @@ const {chromium}=require('playwright');
  await page.getByRole('button',{name:'다음 게임',exact:true}).click();
  assert.equal(await page.locator('.tile').nth(21).getAttribute('aria-pressed'),'true');
  await page.getByRole('button',{name:'이전 게임',exact:true}).click();
+ for(let i=20;i<40;i++)await page.keyboard.press('ArrowRight');
+ assert.equal(await page.locator('.tile').nth(40).getAttribute('aria-pressed'),'true');
  await page.waitForFunction(()=>{const r=document.querySelector('.rail'),box=r.querySelector('.sel').getBoundingClientRect();return r.scrollLeft>0&&box.left>=0&&box.right<=innerWidth});
  assert.notEqual(await page.locator('h1').innerText(),'Game 0');
  await press(0);assert(await page.evaluate(()=>window.started));await press(1);assert(!await page.locator('dialog').isVisible());

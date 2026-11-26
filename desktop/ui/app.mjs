@@ -4,10 +4,18 @@ import {languageFor, libraryView, mergeSource, words} from './model.mjs';
 const $=selector=>document.querySelector(selector);
 const invoke=(name,args={})=>window.__TAURI__.core.invoke(name,args);
 const root=$('#polar'),panel=$('#panel'),content=$('#content'),rail=$('.rail'),grid=$('.grid');
+let railFrame=0;
+function revealSelection(){
+ if(!rail.hidden&&!panel.open)rail.querySelector('.sel')?.scrollIntoView({block:'nearest',inline:'nearest'});
+}
+function settleRail(){
+ if(!railFrame)railFrame=requestAnimationFrame(()=>{railFrame=0;revealSelection()});
+}
+const selectionSize=new ResizeObserver(revealSelection);
 function fitInterface(){
  const scale=Math.max(1, Math.min(window.innerWidth/1920,window.innerHeight/1080));
  $('#interface').style.zoom=String(scale);
- requestAnimationFrame(()=>{if(!panel.open && !rail.hidden)rail.querySelector('.sel')?.scrollIntoView({block:'nearest',inline:'nearest'})});
+ settleRail();
 }
 fitInterface();
 window.addEventListener('resize',fitInterface);
@@ -26,7 +34,7 @@ let library=false,editing=false,filter='all',section='display',modal='',origin=n
 let games=[],tiles=[],scanning=false,launching=false,phase='idle',launchId='',poll=null,hasPad=false;
 let selectedApps=[],draft=null,replaceId=null,firstScan=true,introduced=false;
 let folders=[],folderBusy=false;
-const reports=new Map(),artCache=new Map();
+const reports=new Map(),artCache=new Map(),coverRatios=new Map();
 let onlineArt=saved.onlineArt!==false;
 const artSources=Object.assign(Object.create(null),saved.artSources);
 const setBackground=homeBackground($('#fade'),invoke);
@@ -89,13 +97,28 @@ function coverArt(id){
  }
  return artCache.get(key);
 }
+function fitCover(target,image){
+ if(!target.isConnected)return;
+ if(target.classList.contains('tile')){
+  const ratio=image.naturalWidth/image.naturalHeight;
+  if(coverRatios.get(target.dataset.id)!==ratio){
+   const selected=rail.querySelector('.sel');
+   const rect=selected?.getBoundingClientRect(),bounds=rail.getBoundingClientRect();
+   const inView=rect&&rect.right>bounds.left&&rect.left<bounds.right;
+   coverRatios.set(target.dataset.id,ratio);
+   target.style.setProperty('--ratio',ratio);
+   if(inView)settleRail();
+  }
+ }
+ target.classList.add('hasArt');
+}
 const observer=new IntersectionObserver(entries=>{
  for(const {isIntersecting,target} of entries)if(isIntersecting){
    observer.unobserve(target);
    coverArt(target.dataset.art).then(url=>{
     if(!url||!target.isConnected)return;
     const image=new Image();image.alt='';image.draggable=false;
-    image.onload=()=>target.classList.add('hasArt');
+    image.onload=()=>fitCover(target,image);
     image.onerror=()=>image.remove();
     image.src=url;target.append(image);
    });
@@ -107,7 +130,7 @@ function tile(game,small){
    if(!small){current=game.id;library=false;render(true)}else select(game.id,true);
  },small?'tile':'card');
  b.dataset.id=game.id;b.title=game.name;b.ariaLabel=game.name+' · '+platform(game.source);b.style.setProperty('--hue',hue(game.id));
- if(small){b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
+ if(small){b.style.setProperty('--ratio',coverRatios.get(game.id)||(game.id.startsWith('steam:')?2/3:1));b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
  const cover=small?b:el('div','','cover');cover.dataset.art=game.id;cover.dataset.initials=(game.name.match(/[\p{L}\p{N}]+/gu)||[]).slice(0,2).map(w=>[...w][0]).join('').toLocaleUpperCase(lang);observer.observe(cover);
  if(!small){b.append(cover,el('b',game.name),el('small',platform(game.source)));if(editing)b.setAttribute('aria-pressed',String(favorites.includes(game.id)||favorites.includes(game.alias)))}
  return b;
@@ -128,7 +151,8 @@ function select(id,focus=false){
  if(selected){
   selected.classList.add('sel');selected.tabIndex=0;selected.setAttribute('aria-pressed','true');
   if(focus)selected.focus({preventScroll:true});
-  if(!library)selected.scrollIntoView({block:'nearest',inline:'nearest'});
+  selectionSize.disconnect();
+  if(!library){selectionSize.observe(selected);revealSelection()}
  }
  $('#previousGame').disabled=tiles[0]?.id===id;
  $('#nextGame').disabled=tiles.at(-1)?.id===id;
@@ -150,7 +174,7 @@ function render(focus=false){
  if(!introduced&&(games.length||!firstScan)){
   introduced=true;root.classList.add('entering');setTimeout(()=>root.classList.remove('entering'),650);
  }
- rail.replaceChildren(...tiles.map(g=>tile(g,true)));
+ selectionSize.disconnect();rail.replaceChildren(...tiles.map(g=>tile(g,true)));
  if(current)select(current,!library&&!panel.open&&(focus||wasRail));
  if(!games.length){background();$('.counter').textContent=count(0)}
  if(library){
@@ -194,6 +218,7 @@ function close(){
  if(!panel.open)return;panel.close();modal='';
  if(!library&&current&&(launchId===current||!origin?.isConnected)){select(current,true)}
  else if(origin?.isConnected)origin.focus();else (library?$('#library'):$('#home')).focus();
+ settleRail();
 }
 $('#close').onclick=close;panel.addEventListener('cancel',e=>{e.preventDefault();close()});
 function prefRow(label,control){const r=el('label','','settingRow');r.append(el('span',label),control);return r}
@@ -364,6 +389,24 @@ async function launch(id=current){
 }
 $('#play').onclick=()=>launch();
 window.addEventListener('focus',()=>{if(modal==='launch')pollSession();else if(!modal&&!library&&current)select(current,true)});
+const intro=$('#intro'),systemMotion=matchMedia('(prefers-reduced-motion: reduce)');
+let introTimer;
+const skipKeys=new Set();
+function dismissIntro(){intro.hidden=true;clearTimeout(introTimer)}
+function present(){
+ intro.hidden=motion||systemMotion.matches;
+ intro.onclick=dismissIntro;
+ intro.addEventListener('animationend',e=>{if(e.target===intro&&e.animationName==='introDissolve')dismissIntro()});
+ systemMotion.addEventListener('change',e=>{if(e.matches)dismissIntro()});
+ // The native window also has a three-second fallback if its ready handshake stalls.
+ introTimer=setTimeout(dismissIntro,3000);
+ nativeAction('present',fullscreen).then(()=>{
+  if(intro.hidden)return;
+  clearTimeout(introTimer);
+  intro.classList.add('playing');
+  introTimer=setTimeout(dismissIntro,1000);
+ }).catch(e=>{dismissIntro();error(e)});
+}
 function navigate(key){
  const active=document.activeElement;
  if(key==='Escape'){if(panel.open)close();else switchPage(false);return true}
@@ -383,7 +426,12 @@ function navigate(key){
   if(along<3||across>along*2)continue;if(along+across*4<score){score=along+across*4;best=b}}
  if(best){best.focus();return true}return false;
 }
-document.addEventListener('keydown',e=>{if(e.repeat&&e.key==='Enter'){e.preventDefault();return}if(navigate(e.key))e.preventDefault()});
+document.addEventListener('keydown',e=>{
+ if(skipKeys.has(e.code)){e.preventDefault();return}
+ if(!intro.hidden){dismissIntro();if(['Enter',' ','Escape'].includes(e.key)){skipKeys.add(e.code);e.preventDefault();return}}
+ if(e.repeat&&e.key==='Enter'){e.preventDefault();return}if(navigate(e.key))e.preventDefault()});
+document.addEventListener('keyup',e=>{if(skipKeys.delete(e.code))e.preventDefault()});
+window.addEventListener('blur',()=>skipKeys.clear());
 let last=new Set(),repeatAt=0;
 setInterval(()=>{
  if(document.hidden||!document.hasFocus()){last.clear();return}
@@ -391,6 +439,10 @@ setInterval(()=>{
  if(hasPad!==!!pad){hasPad=!!pad;hints()}if(!pad){last.clear();return}
  const keys=new Set();for(const [n,k] of [[12,'ArrowUp'],[13,'ArrowDown'],[14,'ArrowLeft'],[15,'ArrowRight'],[0,'Enter'],[1,'Escape']])if(pad.buttons[n]?.pressed)keys.add(k);
  const [x,y]=pad.axes;if(Math.abs(x)>.65&&Math.abs(x)>Math.abs(y))keys.add(x<0?'ArrowLeft':'ArrowRight');else if(Math.abs(y)>.65)keys.add(y<0?'ArrowUp':'ArrowDown');
+ if(!intro.hidden&&keys.size){
+  dismissIntro();
+  if(keys.has('Enter')||keys.has('Escape')){last=keys;return}
+ }
  for(const k of keys){const fresh=!last.has(k);if(!fresh&&(!k.startsWith('Arrow')||performance.now()<repeatAt))continue;
   if(k.startsWith('Arrow'))repeatAt=performance.now()+(fresh?380:140);
   if(!navigate(k)&&k==='Enter')document.activeElement.click();
@@ -400,6 +452,6 @@ localize();render();root.classList.add('ready');setInterval(clock,30000);
 invoke('epic_folders',{action:'list'}).then(result=>{
  folders=Array.isArray(result)?result:[];if(modal==='settings'&&section==='sources')settingsBody(true);
 }).catch(error);
-nativeAction('present',fullscreen).catch(error);
+present();
 invoke('get_options').then(opts=>{login=opts.login;if(modal==='settings')settingsBody()}).catch(error);
 scan();

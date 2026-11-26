@@ -5,7 +5,7 @@ const {chromium}=require('playwright');
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.POLAR_CHROME,args:['--no-sandbox']});
  try{
-  for(const mode of ['cold','warm','systemReduced','savedReduced']){
+  for(const mode of ['cold','warm','late','systemReduced','savedReduced']){
    const page=await browser.newPage({viewport:{width:1280,height:780},locale:'ko-KR',reducedMotion:mode==='systemReduced'?'reduce':'no-preference'});
    await page.addInitScript(mode=>{
     const rows=Array.from({length:21},(_,i)=>({source:'xbox',id:'xbox:'+i,name:i===20?'한'.repeat(180):i===0?'Cities: Skylines II':'Game '+String(i).padStart(2,'0')}));
@@ -24,8 +24,9 @@ const {chromium}=require('playwright');
       return [...window.folders];
      }
      if(cmd==='artwork'&&!args.hero){
+      if(mode==='late'){await new Promise(r=>{if(window.readyArt)r();else window.addEventListener('ready-art',r,{once:true})})}
       const sizes=[[300,450],[400,400],[600,300]],n=Number(args.id.split(':')[1])%3;
-      const c=document.createElement('canvas');[c.width,c.height]=sizes[n];
+      const c=document.createElement('canvas');[c.width,c.height]=mode==='late'?[900,210]:sizes[n];
       const ctx=c.getContext('2d');ctx.fillStyle='#fed';ctx.fillRect(0,0,c.width,c.height);
       return c.toDataURL();
      }
@@ -42,6 +43,27 @@ const {chromium}=require('playwright');
    assert.equal(await page.evaluate(()=>window.presented),mode==='cold');
    assert.equal(await page.locator('#shelf').evaluate(e=>getComputedStyle(e).animationName),
     mode.endsWith('Reduced')?'none':'polarEnter');
+   if(mode==='late'){
+    await page.setViewportSize({width:640,height:420});
+    await page.locator('.tile.sel').focus();
+    for(let i=0;i<8;i++)await page.keyboard.press('ArrowRight');
+    const selected=await page.locator('.tile.sel').getAttribute('data-id');
+    await page.locator('#settings').click();
+    await page.evaluate(()=>{window.readyArt=true;window.dispatchEvent(new Event('ready-art'))});
+    await page.waitForFunction(()=>document.querySelectorAll('.tile.hasArt').length>=8);
+    await page.keyboard.press('Escape');
+    const inView=()=>{const r=document.querySelector('.tile.sel').getBoundingClientRect();return r.left>=4&&r.right<=innerWidth-4};
+    await page.waitForFunction(inView,null,{timeout:1500});
+    assert.equal(await page.locator('.tile.sel').getAttribute('data-id'),selected);
+    assert(await page.locator('#settings').evaluate(e=>e===document.activeElement));
+    await page.locator('.tile.sel').focus();
+    for(let i=0;i<6;i++){
+     await page.keyboard.press('ArrowRight');
+     await page.waitForTimeout(240);
+     assert(await page.evaluate(inView),'expanded landscape tile outside the rail');
+    }
+    await page.close();continue;
+   }
    if(mode!=='cold'){await page.close();continue;}
    for(const view of ['home','library']){
     if(view==='library')await page.locator('#library').click();
@@ -49,6 +71,11 @@ const {chromium}=require('playwright');
     for(let i=0;i<3;i++){
      const box=tiles.nth(i);
      await box.locator('img').waitFor({timeout:3000});
+     if(view==='home'){
+      const aspect=await box.evaluate(box=>{const img=box.querySelector('img'),r=box.getBoundingClientRect();
+       return {frame:r.width/r.height,art:img.naturalWidth/img.naturalHeight}});
+      assert(Math.abs(aspect.frame-aspect.art)<.02,'home frame must follow cover '+JSON.stringify(aspect));
+     }
      const info=await box.evaluate(box=>{
       const img=box.querySelector('img'),outer=box.getBoundingClientRect(),r=img.getBoundingClientRect(),s=getComputedStyle(img);
       return {fit:s.objectFit,center:s.objectPosition,inside:r.left>=outer.left-1&&r.right<=outer.right+1&&r.top>=outer.top-1&&r.bottom<=outer.bottom+1,

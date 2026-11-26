@@ -19,10 +19,12 @@
     <clipPath id="cut"><use href="#p"/></clipPath>
   </defs>
   <rect x="5" y="5" width="246" height="246" rx="57" fill="url(#night)" stroke="url(#rim)" stroke-width="2"/>
+  <g id="ribbon">
   <use href="#p" fill="url(#silk)"/>
   <g clip-path="url(#cut)">
     <path d="M53 210 82 75 121 90 104 189Z" fill="url(#stem)"/>
     <path d="M109 164 112 130l40-19c25-12 43-29 48-49 11 23 16 56-27 79Z" fill="url(#fold)"/>
     <path d="m57 205 26-123q2-10 12-14l49-22c18-8 32-6 43 0-15-4-27-1-42 5L98 72q-9 4-12 15Z" fill="#edfff0" opacity=".67"/>
+  </g>
   </g>
 </svg>

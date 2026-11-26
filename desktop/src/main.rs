@@ -29,10 +29,28 @@ fn main() {
                 let _ = w.set_focus();
             }
         }))
+        .setup(|app| {
+            let handle = app.handle().clone();
+            // Reveal the window even if WebView initialization fails before its ready signal.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if !handle
+                    .state::<Data>()
+                    .presented
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    && let Some(window) = handle.get_webview_window("main")
+                {
+                    let _ = window.show();
+                }
+            });
+            Ok(())
+        })
         .manage(Data::default())
         .manage(session::Sessions::default())
         .invoke_handler(tauri::generate_handler![
             discover,
+            epic_folders,
+            online_cover,
             artwork,
             search_backgrounds,
             online_background,

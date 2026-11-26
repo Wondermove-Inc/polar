@@ -171,3 +171,29 @@ fn picks_best_of_store_originals_and_evicts_old_managed_art() {
         (2560, 1440)
     );
 }
+
+#[test]
+fn steam_supplies_a_native_panorama_and_portrait_when_local_art_is_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (source, asset, width, height) in [
+        (Source::Steam(363150), "library_hero.jpg", 1920, 620),
+        (Source::Cover(1091500), "library_600x900_2x.jpg", 600, 900),
+    ] {
+        let get = |url: &str, _: usize| {
+            if !url.ends_with(asset) {
+                return Err("unavailable".into());
+            }
+            let mut encoded = Cursor::new(Vec::new());
+            image::GrayImage::new(width, height)
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .unwrap();
+            Ok(encoded.into_inner())
+        };
+        assert!(resolve(tmp.path(), &source, true, &get).unwrap().is_some());
+        assert!(
+            resolve(tmp.path(), &source, false, &|_, _| panic!("offline"))
+                .unwrap()
+                .is_some()
+        );
+    }
+}

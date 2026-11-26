@@ -29,7 +29,16 @@ const {chromium}=require('playwright');
   await page.evaluate(n=>window.pad.buttons[n].pressed=true,index);await page.waitForTimeout(120);
   await page.evaluate(n=>window.pad.buttons[n].pressed=false,index);await page.waitForTimeout(75);
  }
- await press(15);assert.notEqual(await page.locator('h1').innerText(),'Game 0');
+ assert.equal(await page.locator('.tile').count(),300);
+ assert.equal(await page.locator('.tile.sel').innerText(),'');
+ for(let i=0;i<19;i++)await page.keyboard.press('ArrowRight');
+ await press(15);
+ assert.equal(await page.locator('.tile').nth(20).getAttribute('aria-pressed'),'true');
+ await page.getByRole('button',{name:'다음 게임',exact:true}).click();
+ assert.equal(await page.locator('.tile').nth(21).getAttribute('aria-pressed'),'true');
+ await page.getByRole('button',{name:'이전 게임',exact:true}).click();
+ await page.waitForFunction(()=>{const r=document.querySelector('.rail'),box=r.querySelector('.sel').getBoundingClientRect();return r.scrollLeft>0&&box.left>=0&&box.right<=innerWidth});
+ assert.notEqual(await page.locator('h1').innerText(),'Game 0');
  await press(0);assert(await page.evaluate(()=>window.started));await press(1);assert(!await page.locator('dialog').isVisible());
  await page.evaluate(()=>window.pad=null);await page.waitForTimeout(150);
  assert((await page.locator('.footkeys').innerText()).includes('Enter'));

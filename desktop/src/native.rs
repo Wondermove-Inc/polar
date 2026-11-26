@@ -70,33 +70,109 @@ pub fn registrations(games: bool) -> Result<Vec<Registration>, String> {
     )?;
     serde_json::from_slice(&out).map_err(|e| e.to_string())
 }
+fn local_drives() -> Vec<PathBuf> {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    let mask = unsafe { GetLogicalDrives() };
+    let mut drives = Vec::new();
+    for index in 0..26u8 {
+        if mask & (1 << index) == 0 {
+            continue;
+        }
+        let letter = b'A' + index;
+        let wide = [letter as u16, 58, 92, 0];
+        // DRIVE_REMOVABLE and DRIVE_FIXED only; skip network mounts.
+        if matches!(unsafe { GetDriveTypeW(wide.as_ptr()) }, 2 | 3) {
+            drives.push(PathBuf::from(format!("{}:\\", letter as char)))
+        }
+    }
+    drives
+}
+
+const SETTINGS: &str = r"Software\PolarLauncher";
+pub fn epic_folders() -> Result<Vec<String>, String> {
+    match RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(SETTINGS)
+        .and_then(|k| k.get_value::<Vec<String>, _>("EpicFolders"))
+    {
+        Ok(paths) => Ok(paths.into_iter().filter(|s| !s.is_empty()).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e.to_string()),
+    }
+}
+pub fn save_epic_folders(paths: &Vec<String>) -> Result<(), String> {
+    let key = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey(SETTINGS)
+        .map_err(|e| e.to_string())?
+        .0;
+    key.set_value("EpicFolders", paths)
+        .map_err(|e| e.to_string())
+}
+pub fn pick_folder(owner: windows_sys::Win32::Foundation::HWND) -> Result<Option<String>, String> {
+    use windows_sys::Win32::{
+        System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize},
+        UI::Shell::{
+            BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, SHBrowseForFolderW,
+            SHGetPathFromIDListEx,
+        },
+    };
+    unsafe {
+        let hr = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        if hr < 0 {
+            return Err(format!("Folder picker HRESULT {hr:#x}"));
+        }
+        let mut display = [0u16; 260];
+        let opts = BROWSEINFOW {
+            pszDisplayName: display.as_mut_ptr(),
+            hwndOwner: owner,
+            ulFlags: BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
+            ..Default::default()
+        };
+        let pidl = SHBrowseForFolderW(&opts);
+        let result = if pidl.is_null() {
+            Ok(None)
+        } else {
+            let mut path = vec![0u16; 32768];
+            let ok = SHGetPathFromIDListEx(pidl, path.as_mut_ptr(), path.len() as u32, 0);
+            CoTaskMemFree(pidl.cast());
+            if ok == 0 {
+                Err("Invalid folder".into())
+            } else {
+                let len = path.iter().position(|c| *c == 0).unwrap_or(path.len());
+                String::from_utf16(&path[..len])
+                    .map(Some)
+                    .map_err(|e| e.to_string())
+            }
+        };
+        CoUninitialize();
+        result
+    }
+}
 pub fn source(name: &str) -> Report {
     match name {
         "steam" => polar::catalog::steam_scan(),
-        "epic" => match std::env::var_os("ProgramData") {
-            Some(root) => polar::catalog::epic_scan(
-                &PathBuf::from(root).join("Epic/EpicGamesLauncher/Data/Manifests"),
-            ),
-            None => Report::failure("ProgramData".into()),
-        },
-        "xbox" => match registrations(true) {
-            Ok(rows) => {
-                use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
-                let mask = unsafe { GetLogicalDrives() };
-                let mut drives = Vec::new();
-                for index in 0..26u8 {
-                    if mask & (1 << index) == 0 {
-                        continue;
-                    }
-                    let letter = b'A' + index;
-                    let wide = [letter as u16, 58, 92, 0];
-                    // DRIVE_REMOVABLE and DRIVE_FIXED only; skip network mounts.
-                    if matches!(unsafe { GetDriveTypeW(wide.as_ptr()) }, 2 | 3) {
-                        drives.push(PathBuf::from(format!("{}:\\", letter as char)))
-                    }
-                }
-                polar::catalog::xbox_drives(&rows, &drives)
+        "epic" => {
+            let data = std::env::var_os("ProgramData")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+                .join("Epic");
+            let folders = epic_folders();
+            let custom: Vec<_> = folders
+                .as_ref()
+                .into_iter()
+                .flatten()
+                .map(PathBuf::from)
+                .collect();
+            let mut parents = local_drives();
+            parents.extend(std::env::var_os("ProgramFiles").map(PathBuf::from));
+            let mut report = polar::catalog::epic_installations(&data, &parents, &custom);
+            if let Err(error) = folders {
+                report.complete = false;
+                report.warnings.push(error);
             }
+            report
+        }
+        "xbox" => match registrations(true) {
+            Ok(rows) => polar::catalog::xbox_drives(&rows, &local_drives()),
             Err(e) => Report::failure(e),
         },
         _ => Report::failure("Unknown source".into()),

@@ -15,6 +15,7 @@ const { chromium } = require('playwright');
         if(cmd==='discover') return {complete:true,warnings:[],items:args.source==='epic'?[{id:'epic:a:b:c',source:'epic',name:'B Game'}]:args.source==='steam'?[{id:'steam:20',source:'steam',name:'A Game'}]:[]};
         if(cmd==='get_options') return {login:false,fullscreen:true};
         if(cmd==='search_backgrounds') return [{id:30,name:'B Game Special Edition'}];
+        if(cmd==='artwork' && args.hero && args.id==='steam:20' && window.localReady)return hd;
         if(cmd==='online_background') {
           if(window.delayArt && args.source==='steam:30') await new Promise(resolve=>{window.finishArt=resolve});
           return args.source.startsWith('steam:')?hd:null;
@@ -61,6 +62,10 @@ const { chromium } = require('playwright');
     await page.locator('#settings').click();
     await page.getByRole('button',{name:'Restore default background'}).click();
     await page.getByRole('button',{name:'Close',exact:true}).click();
+    await page.evaluate(()=>window.localReady=true);
+    await page.locator('.tile[data-id="steam:20"]').click();
+    await page.waitForFunction(()=>document.querySelector('#fade').style.opacity==='1',null,{timeout:2000});
+    await page.locator('.tile[data-id^="epic"]').click();
     await page.evaluate(()=>window.finishArt());
     await page.waitForTimeout(350);
     assert.equal(await fade.evaluate(e=>e.style.opacity),'0');

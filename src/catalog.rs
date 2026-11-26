@@ -120,9 +120,10 @@ fn steam_image(cache: &Path, id: &str, kind: &str) -> Option<PathBuf> {
 struct Epic {
     display_name: String,
     install_location: PathBuf,
-    app_name: String,
-    catalog_item_id: String,
-    catalog_namespace: String,
+    #[serde(flatten)]
+    identity: EpicIdentity,
+    #[serde(default)]
+    main_game_app_name: String,
     #[serde(default)]
     launch_executable: String,
     #[serde(default, rename = "bIsIncompleteInstall")]
@@ -131,6 +132,9 @@ struct Epic {
     app_categories: Vec<String>,
 }
 fn epic_uri(parts: [&str; 3]) -> Option<(String, String)> {
+    if parts[0].eq_ignore_ascii_case("ue") || parts[2].starts_with("UE_") {
+        return None;
+    }
     if parts
         .iter()
         .any(|s| s.trim().is_empty() || s.contains(':') || s.chars().any(char::is_control))
@@ -146,65 +150,284 @@ fn epic_uri(parts: [&str; 3]) -> Option<(String, String)> {
     ))
 }
 
+fn epic_json(path: &Path) -> Result<serde_json::Value, String> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    fs::File::open(path)
+        .and_then(|f| f.take(8 * 1024 * 1024 + 1).read_to_end(&mut data))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if data.len() > 8 * 1024 * 1024 {
+        return Err(format!("{}: file too large", path.display()));
+    }
+    serde_json::from_slice(data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&data))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn extension(path: &Path, ext: &str) -> bool {
+    path.extension()
+        .is_some_and(|s| s.eq_ignore_ascii_case(ext))
+}
+
+fn paths(folder: &Path, optional: bool, report: &mut Report) -> Vec<PathBuf> {
+    match fs::read_dir(folder) {
+        Ok(entries) => entries
+            .filter_map(|entry| match entry {
+                Ok(entry) => Some(entry.path()),
+                Err(e) => {
+                    report.warn(format!("{}: {e}", folder.display()));
+                    None
+                }
+            })
+            .collect(),
+        Err(e) => {
+            if !optional || e.kind() != std::io::ErrorKind::NotFound {
+                report.warn(format!("{}: {e}", folder.display()));
+            }
+            vec![]
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct EpicIdentity {
+    catalog_namespace: String,
+    catalog_item_id: String,
+    app_name: String,
+}
+impl EpicIdentity {
+    fn target(&self) -> Option<(String, String)> {
+        epic_uri([
+            &self.catalog_namespace,
+            &self.catalog_item_id,
+            &self.app_name,
+        ])
+    }
+}
+
+#[derive(Default)]
+struct EpicLibrary {
+    seen: HashSet<String>,
+    installed: HashSet<PathBuf>,
+    rejected: std::collections::HashMap<PathBuf, HashSet<String>>,
+    checked: HashSet<PathBuf>,
+}
+impl EpicLibrary {
+    fn excluded(&self, root: &Path, id: &str) -> bool {
+        self.rejected.get(root).is_some_and(|set| set.contains(id))
+    }
+    fn add(
+        &mut self,
+        report: &mut Report,
+        target: (String, String),
+        root: PathBuf,
+        name: Option<String>,
+    ) {
+        let (id, target) = target;
+        if self.seen.contains(&id) {
+            return;
+        }
+        if !root.is_absolute() || !root.is_dir() {
+            report.warn(format!("{}: {}", id, root.display()));
+            return;
+        }
+        let Some(name) = name
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| root.file_name()?.to_str().map(str::to_owned))
+        else {
+            return;
+        };
+        self.seen.insert(id.clone());
+        self.installed.insert(root.clone());
+        report.items.push(Item {
+            id,
+            name,
+            source: "epic".into(),
+            target,
+            root,
+            cover: None,
+            hero: None,
+        });
+    }
+
+    fn manifests(&mut self, folder: &Path, optional: bool, report: &mut Report) {
+        for file in paths(folder, optional, report)
+            .into_iter()
+            .filter(|p| extension(p, "item"))
+        {
+            let parsed = epic_json(&file).and_then(|doc| {
+                serde_json::from_value::<Epic>(doc).map_err(|e| format!("{}: {e}", file.display()))
+            });
+            let rec = match parsed {
+                Ok(rec) => rec,
+                Err(e) => {
+                    report.warn(e);
+                    continue;
+                }
+            };
+            let Some(target) = rec.identity.target() else {
+                continue;
+            };
+            if rec.incomplete
+                || rec.launch_executable.trim().is_empty()
+                || rec.app_categories.iter().any(|s| {
+                    ["engines", "dlc", "plugins"]
+                        .iter()
+                        .any(|t| s.eq_ignore_ascii_case(t))
+                })
+                || (!rec.main_game_app_name.is_empty()
+                    && rec.main_game_app_name != rec.identity.app_name)
+            {
+                self.rejected
+                    .entry(rec.install_location)
+                    .or_default()
+                    .insert(target.0);
+                continue;
+            }
+            self.add(report, target, rec.install_location, Some(rec.display_name));
+        }
+    }
+
+    fn index(&mut self, db: &Path, report: &mut Report) -> Result<(), String> {
+        if !db
+            .try_exists()
+            .map_err(|e| format!("{}: {e}", db.display()))?
+        {
+            return Ok(());
+        }
+        let doc = epic_json(db)?;
+        let entries = doc["InstallationList"]
+            .as_array()
+            .ok_or_else(|| format!("{}: invalid InstallationList", db.display()))?;
+        let mut grouped = std::collections::BTreeMap::<PathBuf, Vec<&serde_json::Value>>::new();
+        for entry in entries {
+            if let Some(root) = entry["InstallLocation"]
+                .as_str()
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+            {
+                grouped.entry(root).or_default().push(entry);
+            }
+        }
+        for (root, rows) in grouped {
+            if self.game_folder(&root, report) {
+                continue;
+            }
+            let mut candidates = std::collections::BTreeMap::new();
+            for row in rows {
+                let parts = [
+                    row["NamespaceId"].as_str(),
+                    row["ItemId"].as_str(),
+                    row["ArtifactId"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .or(row["AppName"].as_str()),
+                ];
+                if let [Some(ns), Some(item), Some(app)] = parts
+                    && let Some((id, target)) = epic_uri([ns, item, app])
+                    && !self.excluded(&root, &id)
+                {
+                    candidates.insert(id, (target, row["DisplayName"].as_str().map(str::to_owned)));
+                }
+            }
+            if candidates.len() == 1
+                && let Some((id, (target, name))) = candidates.pop_first()
+            {
+                self.add(report, (id, target), root, name);
+            } else if candidates.len() > 1 {
+                report.warn(format!(
+                    "{}: ambiguous Epic install records",
+                    root.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    // Return true when local metadata settles this folder, including pending or ambiguous installs.
+    fn game_folder(&mut self, root: &Path, report: &mut Report) -> bool {
+        if self.installed.contains(root) || !self.checked.insert(root.into()) {
+            return true;
+        }
+        let store = root.join(".egstore");
+        let mut candidates = Vec::new();
+        let mut has_record = false;
+        for file in paths(&store, true, report) {
+            let name = file.file_name().unwrap_or_default();
+            if (name.eq_ignore_ascii_case("bps") || name.eq_ignore_ascii_case("Pending"))
+                && !paths(&file, false, report).is_empty()
+            {
+                return true;
+            }
+            if !extension(&file, "mancpn") {
+                continue;
+            }
+            if !file
+                .with_extension("manifest")
+                .metadata()
+                .is_ok_and(|m| m.is_file() && m.len() > 0)
+            {
+                continue;
+            }
+            match epic_json(&file).and_then(|doc| {
+                serde_json::from_value::<EpicIdentity>(doc)
+                    .map_err(|e| format!("{}: {e}", file.display()))
+            }) {
+                Ok(identity) => {
+                    has_record = true;
+                    if let Some(target) = identity.target()
+                        && !self.excluded(root, &target.0)
+                        && !candidates.contains(&target)
+                    {
+                        candidates.push(target)
+                    }
+                }
+                Err(e) => report.warn(e),
+            }
+        }
+        if candidates.len() == 1 {
+            self.add(report, candidates.pop().unwrap(), root.into(), None);
+        } else if candidates.len() > 1 {
+            report.warn(format!(
+                "{}: ambiguous Epic install records",
+                root.display()
+            ));
+        }
+        has_record
+    }
+}
 pub fn epic_scan(folder: &Path) -> Report {
     let mut report = Report::ok();
-    let entries = match fs::read_dir(folder) {
-        Ok(entries) => entries,
-        Err(e) => return Report::failure(format!("{}: {e}", folder.display())),
-    };
-    let mut seen = HashSet::new();
-    for file in entries {
-        let file = match file {
-            Ok(e) => e.path(),
-            Err(e) => {
-                report.warn(e.to_string());
-                continue;
+    EpicLibrary::default().manifests(folder, false, &mut report);
+    report
+}
+pub fn epic_installations(data: &Path, drives: &[PathBuf], custom: &[PathBuf]) -> Report {
+    let mut report = Report::ok();
+    let mut library = EpicLibrary::default();
+    let manifests = data.join("EpicGamesLauncher/Data/Manifests");
+    library.manifests(&manifests, true, &mut report);
+    let db = data.join("UnrealEngineLauncher/LauncherInstalled.dat");
+    if let Err(e) = library.index(&db, &mut report) {
+        report.warn(e);
+    }
+    let mut scanned = HashSet::new();
+    for (root, optional) in custom
+        .iter()
+        .cloned()
+        .map(|p| (p, false))
+        .chain(drives.iter().map(|d| (d.join("Epic Games"), true)))
+    {
+        if !scanned.insert(root.clone()) {
+            continue;
+        }
+        if !optional && root.join(".egstore").is_dir() {
+            library.game_folder(&root, &mut report);
+            continue;
+        }
+        for child in paths(&root, optional, &mut report) {
+            if child.is_dir() {
+                library.game_folder(&child, &mut report);
             }
-        };
-        if file.extension().and_then(|e| e.to_str()) != Some("item") {
-            continue;
-        }
-        let parsed = fs::read(&file)
-            .map_err(|e| e.to_string())
-            .and_then(|data| serde_json::from_slice::<Epic>(&data).map_err(|e| e.to_string()));
-        let rec = match parsed {
-            Ok(rec) => rec,
-            Err(e) => {
-                report.warn(format!("{}: {e}", file.display()));
-                continue;
-            }
-        };
-        if rec.incomplete
-            || rec.launch_executable.is_empty()
-            || rec
-                .app_categories
-                .iter()
-                .any(|s| s.eq_ignore_ascii_case("engines"))
-        {
-            continue;
-        }
-        if !rec.install_location.is_absolute() || !rec.install_location.is_dir() {
-            report.warn(format!(
-                "{}: {}",
-                rec.display_name,
-                rec.install_location.display()
-            ));
-            continue;
-        }
-        if let Some((id, target)) =
-            epic_uri([&rec.catalog_namespace, &rec.catalog_item_id, &rec.app_name])
-            && seen.insert(id.clone())
-            && !rec.display_name.trim().is_empty()
-        {
-            report.items.push(Item {
-                id,
-                name: rec.display_name,
-                source: "epic".into(),
-                target,
-                root: rec.install_location,
-                cover: None,
-                hero: None,
-            });
         }
     }
     report
@@ -340,13 +563,13 @@ pub fn xbox_drives(rows: &[Registration], drives: &[PathBuf]) -> Report {
             }
             matching
         };
-        let cover = game
-            .children()
-            .find(|n| n.has_tag_name("ShellVisuals"))
-            .and_then(|n| n.attribute("Square150x150Logo"))
-            .map(|s| root.join(s))
-            .and_then(|p| p.canonicalize().ok())
-            .filter(|p| root.canonicalize().is_ok_and(|r| p.starts_with(r)));
+        let visuals = game.children().find(|n| n.has_tag_name("ShellVisuals"));
+        let asset = |key: &str| {
+            let p = root.join(visuals?.attribute(key)?).canonicalize().ok()?;
+            (p.is_file() && p.starts_with(root.canonicalize().ok()?)).then_some(p)
+        };
+        let cover = asset("Square480x480Logo").or_else(|| asset("Square150x150Logo"));
+        let hero = asset("SplashScreenImage");
         for row in candidates {
             let id = format!("xbox:{}", row.id);
             if report.items.iter().any(|g| g.id == id) {
@@ -359,7 +582,7 @@ pub fn xbox_drives(rows: &[Registration], drives: &[PathBuf]) -> Report {
                 target: format!("shell:AppsFolder\\{}", row.id),
                 root: root.clone(),
                 cover: cover.clone(),
-                hero: None,
+                hero: hero.clone(),
             });
         }
     }

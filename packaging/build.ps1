@@ -7,7 +7,7 @@ try {
     if ($LASTEXITCODE) { throw 'Rust release build failed' }
     $dist = New-Item -ItemType Directory -Force 'target/dist'
     $exe = (Resolve-Path "target/$target/release/polar-desktop.exe").Path
-    $setup = Join-Path $dist.FullName 'Polar-1.0.0-rc.4-windows-x64-setup.exe'
+    $setup = Join-Path $dist.FullName 'Polar-1.0.0-rc.5-windows-x64-setup.exe'
     $compiler = Get-Command makensis.exe -ErrorAction SilentlyContinue
     $nsis = if ($compiler) { $compiler.Source } else { Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe' }
     & $nsis "/DOUTPUT=$setup" "/DBINARY=$exe" 'packaging/Polar.nsi'

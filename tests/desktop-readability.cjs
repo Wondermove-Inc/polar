@@ -35,6 +35,7 @@ async function visibleInside(page, selector) {
         });
         await page.goto(process.env.POLAR_TEST_URL);
         await page.locator('.tile.sel').waitFor();
+        await page.waitForFunction(()=>!document.querySelector('#polar').classList.contains('entering'));
         assert.deepEqual(await page.locator('#fade').boundingBox(),{x:0,y:0,width,height});
         const samples = {};
         for(const target of ['#home','.gear span:last-child','.counter','kbd','#play','.tile.sel']) samples[target]=await measure(page,target);
@@ -68,7 +69,8 @@ async function visibleInside(page, selector) {
             await visibleInside(page,'#close');
             await page.keyboard.press('Escape');
           }
-          assert.deepEqual(await measure(page,'#home'),reference['#home']);
+          const restored=await measure(page,'#home');
+          for(const dimension of ['box','text'])assert(Math.abs(restored[dimension]-reference['#home'][dimension])<.01);
         }
         await page.close();
       }

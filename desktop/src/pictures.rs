@@ -19,6 +19,7 @@ const HERO_PREFIX: &str = "https://cdn2.steamgriddb.com/hero/";
 
 pub enum Source {
     Steam(u32),
+    Cover(u32),
     Hero(String),
 }
 fn hex(s: &str, length: usize) -> bool {
@@ -37,6 +38,7 @@ impl Source {
     fn key(&self) -> String {
         match self {
             Self::Steam(id) => format!("steam-{id}"),
+            Self::Cover(id) => format!("cover-{id}"),
             Self::Hero(name) => format!("hero-{name}"),
         }
     }
@@ -162,6 +164,12 @@ pub struct Photo {
     width: u32,
     height: u32,
 }
+#[derive(Clone, Copy)]
+enum ImageUse {
+    Background,
+    SteamHero,
+    Cover,
+}
 impl Photo {
     pub fn data_url(&self) -> String {
         format!(
@@ -174,6 +182,12 @@ impl Photo {
         (u64::from(self.width) * 9).min(u64::from(self.height) * 16)
     }
     pub fn decode(bytes: Vec<u8>) -> Option<Self> {
+        Self::read(bytes, ImageUse::Background)
+    }
+    pub fn steam_hero(bytes: Vec<u8>) -> Option<Self> {
+        Self::read(bytes, ImageUse::SteamHero)
+    }
+    fn read(bytes: Vec<u8>, usage: ImageUse) -> Option<Self> {
         if bytes.len() > IMAGE_LIMIT {
             return None;
         }
@@ -182,9 +196,16 @@ impl Photo {
             .ok()?;
         let format = reader.format()?;
         let (width, height) = reader.into_dimensions().ok()?;
-        if width < 1920
-            || height < 1080
-            || width <= height
+        let suitable = match usage {
+            ImageUse::Background => width >= 1920 && height >= 1080 && width > height,
+            ImageUse::SteamHero => {
+                width >= 1920
+                    && width > height
+                    && (height >= 1080 || (height >= 620 && width / height >= 2))
+            }
+            ImageUse::Cover => width >= 200 && height >= 300 && height > width,
+        };
+        if !suitable
             || width > 8192
             || height > 8192
             || u64::from(width) * u64::from(height) > 32_000_000
@@ -241,13 +262,18 @@ pub fn resolve(
     get: &impl Fn(&str, usize) -> Result<Vec<u8>, String>,
 ) -> Result<Option<Photo>, String> {
     let path = dir.join(format!("{}.art", source.key()));
+    let usage = match source {
+        Source::Steam(_) => ImageUse::SteamHero,
+        Source::Hero(_) => ImageUse::Background,
+        Source::Cover(_) => ImageUse::Cover,
+    };
     if let Ok(file) = fs::File::open(&path) {
         let mut bytes = Vec::new();
         if file
             .take(IMAGE_LIMIT as u64 + 1)
             .read_to_end(&mut bytes)
             .is_ok()
-            && let Some(photo) = Photo::decode(bytes)
+            && let Some(photo) = Photo::read(bytes, usage)
         {
             return Ok(Some(photo));
         }
@@ -256,33 +282,50 @@ pub fn resolve(
         return Ok(None);
     }
     let start = Instant::now();
-    let urls = match source {
-        Source::Hero(name) => vec![format!("{HERO_PREFIX}{name}")],
-        Source::Steam(id) => {
-            let raw = get(
-                &format!("https://store.steampowered.com/api/appdetails?appids={id}&l=english"),
-                4 * MIB,
-            )?;
-            screenshot_urls(*id, &serde_json::from_slice(&raw).map_err(|_| "network")?)
-        }
+    let asset = |id: u32, name: &str| {
+        format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{id}/{name}.jpg"
+        )
     };
     let mut best: Option<Photo> = None;
-    for url in urls {
-        if start.elapsed() > Duration::from_secs(12) {
-            break;
+    if let Source::Steam(id) = source {
+        let shots = get(
+            &format!("https://store.steampowered.com/api/appdetails?appids={id}&l=english"),
+            4 * MIB,
+        )
+        .ok()
+        .and_then(|raw| serde_json::from_slice(&raw).ok())
+        .map(|doc| screenshot_urls(*id, &doc))
+        .unwrap_or_default();
+        for url in shots {
+            if start.elapsed() > Duration::from_secs(12) {
+                break;
+            }
+            if let Some(photo) = get(&url, IMAGE_LIMIT).ok().and_then(Photo::decode)
+                && best.as_ref().is_none_or(|b| photo.fit() > b.fit())
+            {
+                best = Some(photo);
+            }
+            if best
+                .as_ref()
+                .is_some_and(|b| b.width >= 3840 && b.height >= 2160)
+            {
+                break;
+            }
         }
-        let Some(photo) = get(&url, IMAGE_LIMIT).ok().and_then(Photo::decode) else {
-            continue;
+    }
+    if best.is_none() {
+        let urls = match source {
+            Source::Steam(id) => vec![asset(*id, "library_hero_2x"), asset(*id, "library_hero")],
+            Source::Cover(id) => vec![
+                asset(*id, "library_600x900_2x"),
+                asset(*id, "library_600x900"),
+            ],
+            Source::Hero(name) => vec![format!("{HERO_PREFIX}{name}")],
         };
-        if best.as_ref().is_none_or(|b| photo.fit() > b.fit()) {
-            best = Some(photo)
-        }
-        if best
-            .as_ref()
-            .is_some_and(|b| b.width >= 3840 && b.height >= 2160)
-        {
-            break;
-        }
+        best = urls
+            .iter()
+            .find_map(|url| Photo::read(get(url, IMAGE_LIMIT).ok()?, usage));
     }
     if let Some(photo) = &best {
         // A full or read-only cache must not hide a usable online picture.

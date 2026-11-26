@@ -139,3 +139,127 @@ fn indexed_and_sharded_steam_records_use_the_key_table() {
         assert!(polar::appinfo::categories(&bytes, &HashSet::from([10])).unwrap()[&10])
     }
 }
+
+#[test]
+fn epic_uses_drive_libraries_database_and_custom_game_folder_without_central_manifests() {
+    let tmp = tempdir().unwrap();
+    let data = tmp.path().join("ProgramData/Epic");
+    let drives = ["C", "D", "E"].map(|letter| tmp.path().join(letter));
+    let extra = tmp.path().join("Other/Custom Game");
+    for (root, app) in [
+        (drives[1].join("Epic Games/Game D"), "d"),
+        (drives[2].join("Epic Games/Game E"), "e"),
+        (extra.clone(), "custom"),
+    ] {
+        let store = root.join(".egstore");
+        fs::create_dir_all(&store).unwrap();
+        let record =
+            serde_json::json!({"AppName":app,"CatalogItemId":"item","CatalogNamespace":"ns"});
+        fs::write(store.join("guid.mancpn"), record.to_string()).unwrap();
+        fs::write(store.join("guid.manifest"), b"installed manifest").unwrap();
+    }
+    let store = drives[1].join("Epic Games/Incomplete/.egstore");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(
+        store.join("guid.mancpn"),
+        r#"{"AppName":"incomplete","CatalogItemId":"item","CatalogNamespace":"ns"}"#,
+    )
+    .unwrap();
+    let other = tmp.path().join("Arbitrary/Fourth");
+    fs::create_dir_all(&other).unwrap();
+    let db = data.join("UnrealEngineLauncher/LauncherInstalled.dat");
+    fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let entry = |root: std::path::PathBuf, app: &str| serde_json::json!({"InstallLocation":root,"ArtifactId":app,"AppName":app,"ItemId":"item","NamespaceId":"ns"});
+    let json = serde_json::json!({"InstallationList":[entry(other,"fourth"),entry(drives[1].join("Epic Games/Game D"),"d")]});
+    fs::write(db, format!("\u{feff}{json}")).unwrap();
+    let report = polar::catalog::epic_installations(&data, &drives, std::slice::from_ref(&extra));
+    assert!(report.complete, "{:?}", report.warnings);
+    let mut ids = report
+        .items
+        .iter()
+        .map(|i| i.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(
+        ids,
+        [
+            "epic:ns:item:custom",
+            "epic:ns:item:d",
+            "epic:ns:item:e",
+            "epic:ns:item:fourth"
+        ]
+    );
+    let e = report.items.iter().find(|i| i.name == "Game E").unwrap();
+    assert_eq!(
+        e.target,
+        "com.epicgames.launcher://apps/ns%3Aitem%3Ae?action=launch&silent=true"
+    );
+    let manifests = data.join("EpicGamesLauncher/Data/Manifests");
+    fs::create_dir_all(&manifests).unwrap();
+    let pending = serde_json::json!({"DisplayName":"Game D","InstallLocation":drives[1].join("Epic Games/Game D"),"AppName":"d","CatalogItemId":"item","CatalogNamespace":"ns","LaunchExecutable":"x.exe","bIsIncompleteInstall":true});
+    fs::write(manifests.join("blocked.ITEM"), pending.to_string()).unwrap();
+    fs::write(manifests.join("corrupt.item"), "{").unwrap();
+    let partial = polar::catalog::epic_installations(&data, &drives, &[extra]);
+    assert!(!partial.complete);
+    assert_eq!(partial.items.len(), 3);
+    assert!(!partial.items.iter().any(|i| i.id.ends_with(":d")));
+}
+
+#[test]
+fn legacy_epic_index_locates_the_install_metadata_outside_default_folders() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("Other/Legacy");
+    let store = root.join(".egstore");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(
+        store.join("abc.mancpn"),
+        r#"{"AppName":"legacy","CatalogItemId":"item","CatalogNamespace":"ns"}"#,
+    )
+    .unwrap();
+    fs::write(store.join("abc.manifest"), b"manifest").unwrap();
+    let db = tmp
+        .path()
+        .join("UnrealEngineLauncher/LauncherInstalled.dat");
+    fs::create_dir_all(db.parent().unwrap()).unwrap();
+    fs::write(
+        db,
+        serde_json::json!({"InstallationList":[{"AppName":"legacy","InstallLocation":root}]})
+            .to_string(),
+    )
+    .unwrap();
+    let scan = || polar::catalog::epic_installations(tmp.path(), &[], &[]);
+    assert_eq!(scan().items[0].id, "epic:ns:item:legacy");
+    fs::create_dir(store.join("Pending")).unwrap();
+    fs::write(store.join("Pending/in-progress"), b"updating").unwrap();
+    assert!(scan().items.is_empty());
+}
+
+#[test]
+fn epic_independent_install_records_survive_stale_and_unreadable_siblings() {
+    let tmp = tempdir().unwrap();
+    let game = tmp.path().join("D/Epic Games/Control");
+    let store = game.join(".egstore");
+    fs::create_dir_all(&store).unwrap();
+    let db = tmp
+        .path()
+        .join("UnrealEngineLauncher/LauncherInstalled.dat");
+    fs::create_dir_all(db.parent().unwrap()).unwrap();
+    fs::write(db,serde_json::json!({"InstallationList":[{"InstallLocation":game,"AppName":"Control","ItemId":"it","NamespaceId":"ns"}]}).to_string()).unwrap();
+    fs::write(store.join("old.mancpn"), "{").unwrap();
+    fs::write(store.join("old.manifest"), "old").unwrap();
+    let scan = || polar::catalog::epic_installations(tmp.path(), &[tmp.path().join("D")], &[]);
+    let r = scan();
+    assert_eq!(r.items.len(), 1);
+    assert_eq!(r.warnings.len(), 1);
+    let manifests = tmp.path().join("EpicGamesLauncher/Data/Manifests");
+    fs::create_dir_all(&manifests).unwrap();
+    let good = serde_json::json!({"DisplayName":"Control","InstallLocation":game,"AppName":"Control","CatalogItemId":"it","CatalogNamespace":"ns","LaunchExecutable":"Control.exe"});
+    let mut old = good.clone();
+    old["InstallLocation"] = tmp.path().join("old").to_str().unwrap().into();
+    old["bIsIncompleteInstall"] = true.into();
+    for (a, b) in [(&good, &old), (&old, &good)] {
+        fs::write(manifests.join("a.item"), a.to_string()).unwrap();
+        fs::write(manifests.join("b.item"), b.to_string()).unwrap();
+        assert_eq!(scan().items.len(), 1);
+    }
+}

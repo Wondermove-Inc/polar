@@ -105,7 +105,7 @@ installNew:
   CreateDirectory "$SMPROGRAMS\Polar Launcher"
   CreateShortcut "$SMPROGRAMS\Polar Launcher\Polar.lnk" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "DisplayName" "Polar"
-  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "1.0.0-rc.4"
+  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "1.0.0-rc.5"
   WriteRegStr HKCU "${UNKEY}" "DisplayIcon" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   IfErrors failed

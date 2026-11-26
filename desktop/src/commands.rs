@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
 pub struct Data {
+    pub presented: std::sync::atomic::AtomicBool,
     pub known: Mutex<HashMap<String, Item>>,
     pub writes: Mutex<()>,
     pub pending: Mutex<Option<Manual>>,
@@ -79,7 +80,12 @@ pub async fn artwork(app: AppHandle, id: String, hero: bool) -> Result<Option<St
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
         if hero {
-            return Ok(Photo::decode(bytes).map(|p| p.data_url()));
+            return Ok(if id.starts_with("steam:") {
+                Photo::steam_hero(bytes)
+            } else {
+                Photo::decode(bytes)
+            }
+            .map(|p| p.data_url()));
         }
         let mime = if bytes.starts_with(&[255, 216, 255]) {
             "jpeg"
@@ -116,6 +122,25 @@ pub async fn search_backgrounds(
 }
 
 #[tauri::command]
+pub async fn online_cover(app: AppHandle, id: u32, online: bool) -> Result<Option<String>, String> {
+    static COVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
+    if id == 0 {
+        return Err("id".into());
+    }
+    let _slot = COVERS.acquire().await.map_err(|_| "closed")?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "cache")?
+        .join("backgrounds");
+    blocking(move || {
+        pictures::resolve(&dir, &Source::Cover(id), online, &pictures::download)
+            .map(|p| p.map(|p| p.data_url()))
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn online_background(
     app: AppHandle,
     source: String,
@@ -130,6 +155,46 @@ pub async fn online_background(
     background_task(move || {
         pictures::resolve(&dir, &source, online, &pictures::download)
             .map(|p| p.map(|photo| photo.data_url()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn epic_folders(
+    app: AppHandle,
+    action: String,
+    path: Option<String>,
+) -> Result<Vec<String>, String> {
+    blocking(move || {
+        let added = match action.as_str() {
+            "list" => return native::epic_folders(),
+            "add" => {
+                let owner = app
+                    .get_webview_window("main")
+                    .ok_or("window")?
+                    .hwnd()
+                    .map_err(|e| e.to_string())?;
+                let Some(path) = native::pick_folder(owner.0)? else {
+                    return native::epic_folders();
+                };
+                Some(path)
+            }
+            "remove" => None,
+            _ => return Err("action".into()),
+        };
+        let state = app.state::<Data>();
+        let _guard = state.writes.lock().unwrap();
+        let mut folders = native::epic_folders()?;
+        if let Some(folder) = added
+            && !folders.iter().any(|p| p.eq_ignore_ascii_case(&folder))
+        {
+            folders.push(folder);
+        }
+        if action == "remove" {
+            folders.retain(|p| Some(p) != path.as_ref());
+        }
+        native::save_epic_folders(&folders)?;
+        Ok(folders)
     })
     .await
 }
@@ -309,6 +374,15 @@ pub fn window_action(
     enabled: bool,
 ) -> Result<(), String> {
     match action.as_str() {
+        "present" => {
+            let mode = window.set_fullscreen(enabled);
+            window.show().map_err(|e| e.to_string())?;
+            window
+                .state::<Data>()
+                .presented
+                .store(true, std::sync::atomic::Ordering::Release);
+            mode
+        }
         "fullscreen" => window.set_fullscreen(enabled),
         "desktop" => window.minimize(),
         "quit" => window.close(),

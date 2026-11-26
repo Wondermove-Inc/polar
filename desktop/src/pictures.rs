@@ -1,4 +1,4 @@
-//! Game artwork from the Steam store and user-selected SteamGridDB originals.
+//! Launcher artwork from Steam, the Epic catalog, and user-selected SteamGridDB originals.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
@@ -21,11 +21,42 @@ pub enum Source {
     Steam(u32),
     Cover(u32),
     Hero(String),
+    Epic(EpicArt),
+}
+pub struct EpicArt {
+    namespace: String,
+    item: String,
+    hero: bool,
 }
 fn hex(s: &str, length: usize) -> bool {
     s.len() == length && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 impl Source {
+    pub fn epic(id: &str, hero: bool) -> Option<Self> {
+        let mut fields = id.strip_prefix("epic:")?.split(':');
+        let (namespace, item, artifact) = (fields.next()?, fields.next()?, fields.next()?);
+        if fields.next().is_some()
+            || namespace.is_empty()
+            || namespace.len() > 64
+            || !namespace
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            || !hex(item, 32)
+            || artifact.is_empty()
+            || artifact.chars().any(char::is_control)
+        {
+            return None;
+        }
+        Some(Self::Epic(EpicArt {
+            namespace: if hex(namespace, 32) {
+                namespace.to_ascii_lowercase()
+            } else {
+                namespace.into()
+            },
+            item: item.to_ascii_lowercase(),
+            hero,
+        }))
+    }
     pub fn parse(s: &str) -> Option<Self> {
         if let Some(id) = s.strip_prefix("steam:") {
             let id: u32 = id.parse().ok()?;
@@ -37,6 +68,10 @@ impl Source {
     }
     fn key(&self) -> String {
         match self {
+            Self::Epic(art) => {
+                let role = if art.hero { "hero" } else { "cover" };
+                format!("epic-{}-{}-{role}", art.namespace, art.item)
+            }
             Self::Steam(id) => format!("steam-{id}"),
             Self::Cover(id) => format!("cover-{id}"),
             Self::Hero(name) => format!("hero-{name}"),
@@ -149,6 +184,92 @@ fn store_cover_urls(id: u32, get: &impl Fn(&str, usize) -> Result<Vec<u8>, Strin
         }
     }
     urls
+}
+
+impl EpicArt {
+    fn matches_namespace(&self, doc: &Value) -> bool {
+        doc["namespace"].as_str().is_some_and(|ns| {
+            ns == self.namespace
+                || (hex(&self.namespace, 32) && ns.eq_ignore_ascii_case(&self.namespace))
+        })
+    }
+    fn photo(
+        &self,
+        usage: ImageUse,
+        get: &impl Fn(&str, usize) -> Result<Vec<u8>, String>,
+    ) -> Option<Photo> {
+        let start = Instant::now();
+        let url = format!("https://api.egdata.app/items/{}", self.item);
+        let read = |url: &str| serde_json::from_slice::<Value>(&get(url, MIB).ok()?).ok();
+        let item = read(&url)?;
+        if !self.matches_namespace(&item)
+            || !item["id"]
+                .as_str()
+                .is_some_and(|id| id.eq_ignore_ascii_case(&self.item))
+        {
+            return None;
+        }
+        let kinds: &[&str] = if self.hero {
+            &[
+                "DieselGameBox",
+                "OfferImageWide",
+                "DieselStoreFrontWide",
+                "featuredMedia",
+            ]
+        } else {
+            &["DieselGameBoxTall", "OfferImageTall", "Thumbnail"]
+        };
+        let mut attempted = Vec::new();
+        let mut from_images = |doc: &Value| {
+            let images = doc["keyImages"].as_array()?;
+            for kind in kinds {
+                for img in images.iter().filter(|i| i["type"].as_str() == Some(*kind)) {
+                    let Some(url) = img["url"].as_str().and_then(|s| Url::parse(s).ok()) else {
+                        continue;
+                    };
+                    if url.scheme() != "https"
+                        || !matches!(
+                            url.host_str(),
+                            Some(
+                                "cdn1.epicgames.com"
+                                    | "cdn2.epicgames.com"
+                                    | "cdn2.unrealengine.com"
+                            )
+                        )
+                        || !url.username().is_empty()
+                        || url.password().is_some()
+                        || url.port().is_some()
+                        || attempted.contains(&url)
+                    {
+                        continue;
+                    }
+                    if attempted.len() >= 6 || start.elapsed() > Duration::from_secs(12) {
+                        return None;
+                    }
+                    attempted.push(url.clone());
+                    if let Some(photo) = get(url.as_str(), IMAGE_LIMIT)
+                        .ok()
+                        .and_then(|data| Photo::read(data, usage))
+                    {
+                        return Some(photo);
+                    }
+                }
+            }
+            None
+        };
+        if let Some(image) = from_images(&item) {
+            return Some(image);
+        }
+        // The item-specific endpoint follows its catalog relationship, including bonus content.
+        if start.elapsed() > Duration::from_secs(12) {
+            return None;
+        }
+        let offer = read(&format!("{url}/offer"))?;
+        if !self.matches_namespace(&offer) || !offer["id"].as_str().is_some_and(|id| hex(id, 32)) {
+            return None;
+        }
+        from_images(&offer)
+    }
 }
 
 pub fn download(url: &str, limit: usize) -> Result<Vec<u8>, String> {
@@ -312,7 +433,8 @@ pub fn resolve(
     let path = dir.join(format!("{}.art", source.key()));
     let usage = match source {
         Source::Steam(_) => ImageUse::SteamHero,
-        Source::Hero(_) => ImageUse::Background,
+        Source::Epic(art) if !art.hero => ImageUse::Cover,
+        Source::Hero(_) | Source::Epic(_) => ImageUse::Background,
         Source::Cover(_) => ImageUse::Cover,
     };
     if let Ok(file) = fs::File::open(&path) {
@@ -363,21 +485,26 @@ pub fn resolve(
         }
     }
     if best.is_none() {
-        let urls = match source {
-            Source::Steam(id) => vec![asset(*id, "library_hero_2x"), asset(*id, "library_hero")],
+        let first_photo = |urls: Vec<String>| {
+            urls.iter()
+                .find_map(|url| Photo::read(get(url, IMAGE_LIMIT).ok()?, usage))
+        };
+        best = match source {
+            Source::Epic(art) => art.photo(usage, get),
+            Source::Steam(id) => first_photo(vec![
+                asset(*id, "library_hero_2x"),
+                asset(*id, "library_hero"),
+            ]),
             Source::Cover(id) => {
                 let mut urls = store_cover_urls(*id, get);
                 urls.extend([
                     asset(*id, "library_600x900_2x"),
                     asset(*id, "library_600x900"),
                 ]);
-                urls
+                first_photo(urls)
             }
-            Source::Hero(name) => vec![format!("{HERO_PREFIX}{name}")],
+            Source::Hero(name) => first_photo(vec![format!("{HERO_PREFIX}{name}")]),
         };
-        best = urls
-            .iter()
-            .find_map(|url| Photo::read(get(url, IMAGE_LIMIT).ok()?, usage));
     }
     if let Some(photo) = &best {
         // A full or read-only cache must not hide a usable online picture.

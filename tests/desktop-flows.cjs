@@ -42,7 +42,7 @@ const {chromium}=require('playwright');
  await page.locator('.tile').nth(1).focus();await page.locator('.tile').nth(1).click();
  await page.keyboard.press('Enter');await page.waitForFunction(()=>window.calls.some(v=>v.cmd==='launch_game'));
  await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.calls.filter(v=>v.cmd==='launch_game').length),1);
- await page.evaluate(()=>window.finished=true);await page.waitForFunction(()=>window.endObserved&&!document.querySelector('dialog').open);
+ await page.evaluate(()=>window.finished=true);await page.waitForFunction(()=>window.endObserved&&document.querySelector('#play').textContent==='Play');
  assert.match(await page.locator('h1').innerText(),/Game 001/);
  await page.evaluate(()=>{window.errorLaunch=true;window.fail=true;window.slow=true});
  await page.locator('#play').click();await btn('Try again').waitFor();await page.keyboard.press('Escape');

@@ -74,7 +74,7 @@ const {chromium}=require('playwright');
      {
       const aspect=await box.evaluate(box=>{const img=box.querySelector('img'),r=box.getBoundingClientRect();
        return {frame:r.width/r.height,art:img.naturalWidth/img.naturalHeight}});
-      assert(Math.abs(aspect.frame-2/3)<.02,'every frame must be 2:3 '+JSON.stringify(aspect));
+      assert(Math.abs(aspect.frame-1)<.02,'Game Pass frame must be square '+JSON.stringify(aspect));
      }
      const info=await box.evaluate(box=>{
       const img=box.querySelector('img'),outer=box.getBoundingClientRect(),r=img.getBoundingClientRect(),s=getComputedStyle(img);

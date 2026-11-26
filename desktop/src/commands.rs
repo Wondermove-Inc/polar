@@ -130,10 +130,27 @@ pub async fn search_backgrounds(
 
 #[tauri::command]
 pub async fn online_cover(app: AppHandle, id: u32, online: bool) -> Result<Option<String>, String> {
-    static COVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
     if id == 0 {
         return Err("id".into());
     }
+    cover_image(app, Source::Cover(id), online).await
+}
+
+#[tauri::command]
+pub async fn epic_cover(
+    app: AppHandle,
+    id: String,
+    online: bool,
+) -> Result<Option<String>, String> {
+    cover_image(app, Source::epic(&id, false).ok_or("source")?, online).await
+}
+
+async fn cover_image(
+    app: AppHandle,
+    source: Source,
+    online: bool,
+) -> Result<Option<String>, String> {
+    static COVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
     let _slot = COVERS.acquire().await.map_err(|_| "closed")?;
     let dir = app
         .path()
@@ -141,7 +158,7 @@ pub async fn online_cover(app: AppHandle, id: u32, online: bool) -> Result<Optio
         .map_err(|_| "cache")?
         .join("backgrounds");
     blocking(move || {
-        pictures::resolve(&dir, &Source::Cover(id), online, &pictures::download)
+        pictures::resolve(&dir, &source, online, &pictures::download)
             .map(|p| p.map(|p| p.data_url()))
     })
     .await
@@ -153,17 +170,26 @@ pub async fn online_background(
     source: String,
     online: bool,
 ) -> Result<Option<String>, String> {
-    let source = Source::parse(&source).ok_or("source")?;
+    let source = Source::parse(&source)
+        .or_else(|| Source::epic(&source, true))
+        .ok_or("source")?;
     let dir = app
         .path()
         .app_cache_dir()
         .map_err(|_| "cache")?
         .join("backgrounds");
-    background_task(move || {
+    let load = move || {
         pictures::resolve(&dir, &source, online, &pictures::download)
             .map(|p| p.map(|photo| photo.data_url()))
-    })
-    .await
+    };
+    if online {
+        background_task(load).await
+    } else {
+        // Cache hits should not wait behind HTTP work from a previous selection.
+        static READERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+        let _slot = READERS.acquire().await.map_err(|_| "closed")?;
+        blocking(load).await
+    }
 }
 
 #[tauri::command]

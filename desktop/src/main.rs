@@ -51,6 +51,7 @@ fn main() {
             discover,
             epic_folders,
             online_cover,
+            epic_cover,
             artwork,
             search_backgrounds,
             online_background,

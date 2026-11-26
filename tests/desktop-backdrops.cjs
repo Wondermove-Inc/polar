@@ -53,7 +53,7 @@ const { chromium } = require('playwright');
     await page.getByRole('button',{name:'Apply image'}).click();
     await page.waitForFunction(()=>document.querySelector('.backgroundSettings [role=status]').textContent.includes('Could not load'));
     await page.keyboard.press('Escape');await page.locator('#settings').click();
-    await page.getByRole('checkbox',{name:'Online game backgrounds'}).uncheck();
+    await page.getByRole('checkbox',{name:'Online game artwork'}).uncheck();
     await page.reload();
     await page.locator('.tile[data-id^="epic"]').click();
     await page.waitForFunction(()=>window.calls.some(([cmd,a])=>cmd==='online_background'&&a.source==='steam:30'&&!a.online));

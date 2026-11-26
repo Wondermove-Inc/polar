@@ -289,3 +289,148 @@ fn live_covers_for_reported_missing_posters() {
         eprintln!("{app}: {} x {}", dimensions.0, dimensions.1);
     }
 }
+
+const EPIC_ITEM: &str = "761fe09295aa422e8199cebaacf51675";
+const DS_NAMESPACE: &str = "f4a904fcef2447439c35c4e6457f3027";
+#[test]
+fn epic_art_uses_the_exact_catalog_item_and_its_official_images() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = Source::epic(
+        &format!("epic:wex:{}:App", EPIC_ITEM.to_ascii_uppercase()),
+        false,
+    )
+    .unwrap();
+    let metadata = format!("https://api.egdata.app/items/{EPIC_ITEM}");
+    let image_url = "https://cdn1.epicgames.com/wex/item/published.jpg";
+    let doc = serde_json::json!({"id":EPIC_ITEM,"namespace":"wex","keyImages":[
+        {"type":"DieselGameBoxTall","url":"https://example.org/published.jpg"},
+        {"type":"DieselGameBoxTall","url":"https://cdn1.epicgames.com:82/x.jpg"},
+        {"type":"DieselGameBoxTall","url":"http://cdn1.epicgames.com/x.jpg"},
+        {"type":"DieselGameBox","url":"https://cdn1.epicgames.com/wex/item/landscape.jpg"},
+        {"type":"DieselGameBoxTall","url":image_url}]});
+    let mut img = Cursor::new(Vec::new());
+    image::GrayImage::new(320, 480)
+        .write_to(&mut img, image::ImageFormat::Png)
+        .unwrap();
+    let get = |url: &str, _: usize| {
+        if url == metadata {
+            return Ok(serde_json::to_vec(&doc).unwrap());
+        }
+        assert_eq!(url, image_url);
+        Ok(img.get_ref().clone())
+    };
+    assert!(
+        resolve(dir.path(), &source, false, &|_, _| panic!("offline"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(resolve(dir.path(), &source, true, &get).unwrap().is_some());
+    assert!(
+        resolve(dir.path(), &source, false, &|_, _| panic!("offline"))
+            .unwrap()
+            .is_some()
+    );
+    let hero = Source::epic(&format!("epic:wex:{EPIC_ITEM}:App"), true).unwrap();
+    assert!(
+        resolve(dir.path(), &hero, false, &|_, _| panic!(
+            "wrong image cache"
+        ))
+        .unwrap()
+        .is_none()
+    );
+    for bad in [
+        "epic:../../other:ffffffffffffffffffffffffffffffff:A",
+        "epic:wex:invalid:A",
+        "epic-short:unresolved",
+        "epic:wex:ffffffffffffffffffffffffffffffff:",
+    ] {
+        assert!(Source::epic(bad, false).is_none());
+    }
+    for (namespace, id) in [
+        ("other", EPIC_ITEM),
+        ("wex", "ffffffffffffffffffffffffffffffff"),
+    ] {
+        let bad = serde_json::json!({"id":id,"namespace":namespace,"keyImages":doc["keyImages"]});
+        assert!(
+            resolve(dir.path(), &hero, true, &|url, _| {
+                assert_eq!(url, metadata);
+                Ok(serde_json::to_vec(&bad).unwrap())
+            })
+            .unwrap()
+            .is_none()
+        );
+    }
+}
+#[test]
+fn epic_uses_related_offer_only_if_item_art_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = Source::epic(&format!("epic:wex:{EPIC_ITEM}:BonusContent"), true).unwrap();
+    let metadata = format!("https://api.egdata.app/items/{EPIC_ITEM}");
+    let bad_image = "https://cdn1.epicgames.com/wex/item/tiny.jpg";
+    let hero = "https://cdn2.unrealengine.com/hero.jpg";
+    let item = serde_json::json!({"id":EPIC_ITEM,"namespace":"wex","keyImages":[{"type":"DieselGameBox","url":bad_image}]});
+    let offer = serde_json::json!({"id":"ffffffffffffffffffffffffffffffff","namespace":"wex","keyImages":[{"type":"OfferImageWide","url":hero}]});
+    let mut img = Cursor::new(Vec::new());
+    image::GrayImage::new(1920, 1080)
+        .write_to(&mut img, image::ImageFormat::Png)
+        .unwrap();
+    let run = |doc: &serde_json::Value| {
+        resolve(dir.path(), &source, true, &|url, _| {
+            if url == metadata {
+                return Ok(serde_json::to_vec(&item).unwrap());
+            }
+            if url == bad_image {
+                return Ok(vec![0u8; 12]);
+            }
+            if url == format!("{metadata}/offer") {
+                return Ok(serde_json::to_vec(doc).unwrap());
+            }
+            assert_eq!(url, hero);
+            Ok(img.get_ref().clone())
+        })
+        .unwrap()
+    };
+    let mut wrong = offer.clone();
+    wrong["namespace"] = "other".into();
+    assert!(run(&wrong).is_none());
+    assert!(run(&offer).is_some());
+}
+#[test]
+#[ignore = "retrieves the reported catalog items and their current Epic CDN originals"]
+fn live_epic_art_for_reported_games() {
+    use polar_desktop::pictures::download;
+    let dir = tempfile::tempdir().unwrap();
+    for (ns, item, artifact) in [
+        (DS_NAMESPACE, EPIC_ITEM, "Boga"),
+        (
+            DS_NAMESPACE,
+            "678578f8abe84265b0d5f81c1997c6da",
+            "5bf67f3153364181b54cb9e40ca7fa82",
+        ),
+        (
+            "b30b6d1b4dfd4dcc93b5490be5e094e5",
+            "22a7b503221442daa2fb16ad37b6ccbf",
+            "Heather",
+        ),
+    ] {
+        for hero in [false, true] {
+            let source = Source::epic(&format!("epic:{ns}:{item}:{artifact}"), hero).unwrap();
+            let photo = resolve(dir.path(), &source, true, &download)
+                .unwrap()
+                .unwrap();
+            let offline = resolve(dir.path(), &source, false, &|_, _| panic!("offline"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(photo.data_url().len(), offline.data_url().len());
+            let role = if hero { "hero" } else { "cover" };
+            let path = dir.path().join(format!("epic-{ns}-{item}-{role}.art"));
+            let dims = image::ImageReader::open(&path)
+                .unwrap()
+                .with_guessed_format()
+                .unwrap()
+                .into_dimensions()
+                .unwrap();
+            eprintln!("{item} {role}: {dims:?}");
+        }
+    }
+}

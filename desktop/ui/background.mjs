@@ -34,6 +34,16 @@ export function homeBackground(layer, invoke) {
     fit();
     layer.style.opacity = image ? '1' : '0';
   }
+  async function storedOrOnline(job,local,online) {
+    if(selection!==job)return false;
+    const url=await invoke('online_background',{source:job.source,online}).catch(()=>null);
+    if(selection!==job)return false;
+    const remote=await decodeBackground(url,job.source.startsWith('steam:'));
+    if(selection!==job||!remote)return false;
+    const coverage=image=>Math.min(image.naturalWidth/layer.clientWidth,image.naturalHeight/layer.clientHeight);
+    if(job.override||!local||coverage(remote)>coverage(local))show(remote);
+    return true;
+  }
   async function drainRemote() {
     if (running) return;
     running=true;
@@ -41,12 +51,7 @@ export function homeBackground(layer, invoke) {
       while (queued) {
         const {job,local}=queued;
         queued=null;
-        const url=await invoke('online_background',{source:job.source,online:job.online}).catch(()=>null);
-        if(selection!==job)continue;
-        const remote=await decodeBackground(url,job.source.startsWith('steam:'));
-        if(selection!==job || !remote)continue;
-        const coverage=image=>Math.min(image.naturalWidth/layer.clientWidth,image.naturalHeight/layer.clientHeight);
-        if(job.override||!local||coverage(remote)>coverage(local))show(remote);
+        await storedOrOnline(job,local,true);
       }
     } finally {running=false}
   }
@@ -57,6 +62,11 @@ export function homeBackground(layer, invoke) {
     if(selection!==job)return;
     if(local)show(local);
     if(job.source && (job.override || !(local?.naturalWidth>=3840 && local.naturalHeight>=2160))){
+      // A cached selection can be painted while an older game's download finishes.
+      if(running||!job.online){
+        const hit=await storedOrOnline(job,local,false);
+        if(hit||!job.online||selection!==job)return;
+      }
       queued={job,local};drainRemote();
     }
   }

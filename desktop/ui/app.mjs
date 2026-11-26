@@ -34,7 +34,8 @@ let remembered=current;
 try{remembered=localStorage.getItem('polar.selected')||current;current=remembered}catch{}
 let motion=saved.motion===true,fullscreen=saved.fullscreen!==false,login=false;
 let library=false,editing=false,filter='all',section='display',modal='',origin=null;
-let games=[],tiles=[],scanning=false,launching=false,phase='idle',launchId='',poll=null,hasPad=false;
+let games=[],tiles=[],scanning=false,hasPad=false;
+let launchState=null,pollTimer,lastSerial=0;
 let selectedApps=[],draft=null,replaceId=null,firstScan=true,introduced=false;
 let folders=[],folderBusy=false;
 const reports=new Map(),artCache=new Map();
@@ -46,7 +47,7 @@ let ambientRequest;
 function background(refresh=false){
  const game=games.find(g=>g.id===current);
  const override=artSources[current]||artSources[game?.alias];
- const source=override||(/^steam:[1-9]\d*$/.test(current)?current:null);
+ const source=override||(/^steam:[1-9]\d*$/.test(current)||current.startsWith('epic:')?current:null);
  const active=library||!game?'':current;
  const ambient=$('#ambient'),coverKey=active && coverCacheKey(active);
  if(ambient.dataset.key!==coverKey || refresh){
@@ -84,7 +85,10 @@ function steamCover(id){
  const link=artSources[id]||artSources[games.find(g=>g.id===id)?.alias];
  return /^steam:[1-9]\d*$/.test(id)?id:link?.startsWith('steam:')?link:null;
 }
-function coverCacheKey(id){return id+'|'+(games.find(g=>g.id===id)?.alias||'')+'|'+(steamCover(id)||'')+'|'+onlineArt}
+function coverCacheKey(id){
+ const game=games.find(g=>g.id===id);
+ return [id,game?.source,game?.alias,steamCover(id),onlineArt].join('|');
+}
 function clearCovers(ids){
  for(const [key,entry] of artCache)if(ids.has(entry.id))artCache.delete(key);
 }
@@ -92,16 +96,16 @@ function coverArt(id){
  const key=coverCacheKey(id);
  if(!artCache.has(key)){
   if(artCache.size>=72)artCache.delete(artCache.keys().next().value);
-  const source=steamCover(id),online=onlineArt;
+  const source=steamCover(id),online=onlineArt,game=games.find(g=>g.id===id);
   const image=(async()=>{
-   const alias=games.find(g=>g.id===id)?.alias;
-   const custom=await readCover(id,alias).catch(()=>null);
+   const custom=await readCover(id,game?.alias).catch(()=>null);
    if(custom)return custom;
    async function portrait(){
     if(!source||(online&&!onlineArt))return null;
     return invoke('online_cover',{id:Number(source.slice(6)),online}).catch(()=>null);
    }
-   if(source&&!id.startsWith('steam:')){
+   const preferLinked=source&&!id.startsWith('steam:')&&game?.source!=='xbox';
+   if(preferLinked){
     const image=await portrait();if(image)return image;
    }
    const local=await invoke('artwork',{id,hero:false}).catch(()=>null);
@@ -109,7 +113,11 @@ function coverArt(id){
     const image=new Image();image.src=local;
     try{await image.decode();return local}catch{}
    }
-   return id.startsWith('steam:')?portrait():null;
+   if(source&&!preferLinked){
+    const image=await portrait();if(image)return image;
+   }
+   if(id.startsWith('epic:'))return invoke('epic_cover',{id,online:online&&onlineArt}).catch(()=>null);
+   return null;
   })();
   artCache.set(key,{id,image});
  }
@@ -117,7 +125,8 @@ function coverArt(id){
 }
 function fitCover(target,image){
  if(!target.isConnected)return;
- if(Math.abs(image.naturalWidth/image.naturalHeight-2/3)>.02){
+ const frame=target.dataset.platform==='xbox'?1:2/3;
+ if(Math.abs(image.naturalWidth/image.naturalHeight-frame)>.02){
   target.style.setProperty('--tint','url("'+image.src+'")');
  }
  target.classList.add('hasArt');
@@ -144,7 +153,7 @@ function tile(game,small){
  b.setAttribute('aria-haspopup','dialog');
  b.oncontextmenu=e=>{e.preventDefault();editGame(game,b)};
  if(small){b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
- const cover=small?b:el('div','','cover');cover.dataset.art=game.id;cover.dataset.initials=(game.name.match(/[\p{L}\p{N}]+/gu)||[]).slice(0,2).map(w=>[...w][0]).join('').toLocaleUpperCase(lang);observer.observe(cover);
+ const cover=small?b:el('div','','cover');cover.dataset.platform=game.source;cover.dataset.art=game.id;cover.dataset.initials=(game.name.match(/[\p{L}\p{N}]+/gu)||[]).slice(0,2).map(w=>[...w][0]).join('').toLocaleUpperCase(lang);observer.observe(cover);
  if(!small){b.append(cover,el('b',game.name),el('small',platform(game.source)));if(editing)b.setAttribute('aria-pressed',String(favorites.includes(game.id)||favorites.includes(game.alias)))}
  return b;
 }
@@ -180,7 +189,7 @@ function select(id,focus=false){
  }
  $('#previousGame').disabled=tiles[0]?.id===id;
  $('#nextGame').disabled=tiles.at(-1)?.id===id;
- background();
+ launchView();background();
  $('.counter').textContent=count(games.length);
 }
 function render(focus=false){
@@ -263,7 +272,7 @@ function close(){
  const restored=(tileId&&(library?grid.querySelector('[data-id="'+CSS.escape(tileId)+'"]'):rail.querySelector('.sel')))||
   (library&&folder&&grid.querySelector('[data-epic-folder="'+CSS.escape(folder)+'"]'));
  if(restored){restored.focus({preventScroll:true});if(library)restored.scrollIntoView({block:'nearest',inline:'nearest'})}
- else if(!library&&current&&(launchId===current||!origin?.isConnected)){select(current,true)}
+ else if(!library&&current&&!origin?.isConnected){select(current,true)}
  else if(origin?.isConnected)origin.focus();else (library?$('#library'):$('#home')).focus();
  settleRail();
 }
@@ -289,7 +298,7 @@ function settingsBody(keep=false){
   const row=el('div','','languageRow');row.append(el('span',tr('language')),languages);body.append(row,
    prefRow(tr('motion'),toggle(motion,v=>{motion=v;root.classList.toggle('noMotion',v);persist()})),
    prefRow(tr('fullscreen'),toggle(fullscreen,async v=>{await nativeAction('fullscreen',v);fullscreen=v;persist()})));
-  const onlineToggle=toggle(onlineArt,v=>{onlineArt=v;persist();render();settingsBody(true)});
+  const onlineToggle=toggle(onlineArt,v=>{onlineArt=v;artCache.clear();persist();render();settingsBody(true)});
   onlineToggle.dataset.control='onlineArt';body.append(prefRow(tr('onlineArt'),onlineToggle));
 
  }else if(section==='sources'){
@@ -327,7 +336,7 @@ function editGame(game,trigger){
  if(!game)return;
  open('game',tr('gameEdit'));origin=trigger;
  const main=el('section','','gameEditor'),header=el('div','','editorGame'),preview=el('div','','cover');
- preview.style.setProperty('--hue',hue(game.id));preview.dataset.initials=[...game.name][0]||'';
+ preview.dataset.platform=game.source;preview.style.setProperty('--hue',hue(game.id));preview.dataset.initials=[...game.name][0]||'';
  const summary=el('div','','editorTitle');summary.append(el('small',platform(game.source)));header.append(preview,summary);
  const title=el('label',tr('title'),'field'),name=el('input');
  name.type='text';name.maxLength=180;name.value=game.name;title.append(name);
@@ -482,34 +491,78 @@ function manualForm(folder=null){
 }
 $('#addLib').onclick=()=>addDialog();
 $('#addEmpty').onclick=()=>{if(pendingEpic().length){filter='epic';switchPage(true);grid.querySelector('[data-epic-folder]')?.focus()}else addDialog()};
+function inFlight(){
+ return launchState&&['request','waiting','running'].includes(launchState.phase);
+}
 function launchView(){
- if(modal!=='launch')return;
- const game=games.find(g=>g.id===launchId);
- $('#panelTitle').textContent=game?.name||tr('play');content.replaceChildren(el('p',tr(phase),'note'));
- if(phase==='failed'||phase==='unknown'){content.append(button(tr('retry'),()=>launch(launchId)));
-  if(game&&platforms.slice(0,3).includes(game.source))content.append(button(tr('platformOpen'),()=>invoke('open_platform',{source:game.source}).catch(error)));
+ const play=$('#play'),info=$('#launchStatus'),launcher=$('#openLauncher');
+ const game=games.find(g=>g.id===current);
+ const own=launchState&&(launchState.id===current||launchState.id===game?.alias),active=inFlight(),phase=launchState?.phase;
+ let label='play',note='',showNote=false;
+ if(own&&active){
+  label=phase==='running'?'running':'starting';note=tr(label);
+ }else if(own&&phase){
+  label='retry';note=tr(phase);showNote=true;
+ }else if(active){
+  const title=games.find(g=>g.id===launchState.id)?.name||launchState.name;
+  note=tr(phase==='running'?'otherRunning':'otherStarting').replace('{game}',()=>title);
+  showNote=true;
  }
- $('#close').textContent=tr('home');
+ play.textContent=tr(label);play.setAttribute('aria-disabled',String(!!active));
+ info.classList.toggle('visuallyHidden',!showNote);
+ if(info.textContent!==note)info.textContent=note;
+ launcher.hidden=!(own&&['failed','unknown','busy'].includes(phase)&&platforms.slice(0,3).includes(game?.source));
 }
-async function pollSession(){
- try{const s=await invoke('get_session');if(s.id&&s.id!==launchId)return;
-  if(s.phase==='ended'){phase='ended';if(modal==='launch')close();stopPoll()}
-  else if(['waiting','running','unknown','failed'].includes(s.phase)){if(phase!==s.phase){phase=s.phase;launchView()}if(['unknown','failed'].includes(phase))stopPoll()}
- }catch(e){stopPoll();phase='unknown';launchView();error(e)}
+async function pollSession(state){
+ if(!state||launchState!==state||state.reading||!['waiting','running'].includes(state.phase))return;
+ clearTimeout(pollTimer);state.reading=true;
+ try{
+  const snapshot=await invoke('get_session');
+  if(launchState!==state)return;
+  if((!snapshot.id||snapshot.id===state.id)&&(!Number.isSafeInteger(snapshot.serial)||snapshot.serial>=state.minSerial)){
+   if(Number.isSafeInteger(snapshot.serial))state.minSerial=lastSerial=snapshot.serial;
+   if(snapshot.phase==='ended')launchState=null;
+   else if(snapshot.phase==='requesting')state.phase='waiting';
+   else state.phase=['waiting','running','failed','unknown'].includes(snapshot.phase)?snapshot.phase:'unknown';
+  }
+ }catch{if(launchState===state)state.phase='unknown'}
+ finally{state.reading=false}
+ if(launchState&&launchState!==state)return;
+ launchView();
+ if(inFlight())pollTimer=setTimeout(()=>pollSession(state),800);
 }
-function stopPoll(){clearInterval(poll);poll=null}
 async function launch(id=current){
- if(!id)return;
- if(launching||poll){if(!panel.open){open('launch',tr('play'));launchView();$('#close').focus()}return}
- launchId=id;phase='request';launching=true;open('launch',tr('play'));launchView();$('#close').focus();
+ if(!id||inFlight())return;
+ const state={id,name:games.find(g=>g.id===id)?.name||id,minSerial:lastSerial+1,phase:'request'};
+ launchState=state;launchView();
  try{
   await invoke('launch_game',{id});recent=[id,...recent.filter(x=>x!==id)].slice(0,100);persist();
-  phase='waiting';launchView();poll=setInterval(pollSession,800);await pollSession();
- }catch(e){phase=String(e)==='busy'?'busy':'failed';launchView();error(e)}
- finally{launching=false}
+  state.phase='waiting';launchView();await pollSession(state);
+ }catch(e){
+  const busy=String(e)==='busy';
+  if(busy){
+   // A WebView reload can leave a live native session without a corresponding UI request.
+   try{
+    const live=await invoke('get_session');
+    if(launchState!==state)return;
+    if(live.id&&['requesting','waiting','running'].includes(live.phase)){
+     state.id=live.id;state.name=games.find(g=>g.id===live.id)?.name||tr('otherGame');
+     state.minSerial=Number.isSafeInteger(live.serial)?live.serial:0;
+     lastSerial=Math.max(lastSerial,state.minSerial);
+     state.phase=live.phase==='running'?'running':'waiting';
+     launchView();pollTimer=setTimeout(()=>pollSession(state),800);return;
+    }
+   }catch{}
+  }
+  state.phase=busy?'busy':'failed';launchView();
+ }
 }
 $('#play').onclick=()=>launch();
-window.addEventListener('focus',()=>{if(modal==='launch')pollSession();else if(!modal&&!library&&current)select(current,true)});
+$('#openLauncher').onclick=()=>{
+ const game=games.find(g=>g.id===current);
+ if(game&&platforms.slice(0,3).includes(game.source))invoke('open_platform',{source:game.source}).catch(error)
+};
+window.addEventListener('focus',()=>pollSession(launchState));
 const intro=$('#intro'),systemMotion=matchMedia('(prefers-reduced-motion: reduce)');
 let introTimer;
 const skipKeys=new Set();

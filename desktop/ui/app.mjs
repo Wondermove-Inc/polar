@@ -4,6 +4,12 @@ import {languageFor, libraryView, mergeSource, words} from './model.mjs';
 const $=selector=>document.querySelector(selector);
 const invoke=(name,args={})=>window.__TAURI__.core.invoke(name,args);
 const root=$('#polar'),panel=$('#panel'),content=$('#content'),rail=$('.rail'),grid=$('.grid');
+function fitInterface(){
+ const scale=Math.max(1, Math.min(window.innerWidth/1920,window.innerHeight/1080));
+ $('#interface').style.zoom=String(scale);
+}
+fitInterface();
+window.addEventListener('resize',fitInterface);
 const platforms=['steam','xbox','epic','manual'];
 const platformNames={steam:'Steam',xbox:'PC Game Pass',epic:'Epic Games'};
 const stateKey='polar.desktop.v1';

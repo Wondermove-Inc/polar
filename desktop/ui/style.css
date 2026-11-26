@@ -44,8 +44,21 @@ h1{font-weight:600}#homeEmpty{margin:auto 0;padding:20px var(--pad)}.lib{overflo
 #panel{position:absolute;inset:0;z-index:2;margin:0;max-width:none;max-height:none;width:100%;height:100%;background:#101b22f7;color:#f5f7fa;border:0;overflow:auto;padding:clamp(20px,4vw,58px) var(--pad);backdrop-filter:blur(16px)}
 #panel::backdrop{background:#071016bd}#panel h2{font-size:clamp(26px,3vw,48px);margin:0 0 24px}#panel h3{margin:4px 0 16px}.popBody{max-width:970px}.buttons{display:flex;flex-wrap:wrap;gap:9px;margin:14px 0}.field{display:grid;gap:5px;margin:10px 0}.field input,.field select,#search{background:#202f38;color:#fff;border:1px solid #71818a;padding:9px;border-radius:6px;max-width:500px;font:inherit}
 #panel .return{margin-top:12px}.appList{max-height:190px;overflow:auto;display:grid;gap:3px}.appList button{text-align:left;padding:7px}.note{color:#bfcbce;line-height:1.5}.scanRow{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #fff2;padding:10px 0}
-#alert{color:#ffd5bd;white-space:pre-wrap;overflow-wrap:anywhere}.faults{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:110px;overflow:auto}footer{margin-top:auto}.details+footer{margin-top:0}.details{padding-bottom:3vh}#stage:has(.details:not([hidden])){margin-top:auto}#stage{flex-shrink:0}
+#alert{color:#ffd5bd;white-space:pre-wrap;overflow-wrap:anywhere}.faults{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:110px;overflow:auto}footer{margin-top:auto}.details+footer{margin-top:0}.details{padding-bottom:3cqh}#stage:has(.details:not([hidden])){margin-top:auto}#stage{flex-shrink:0}
 #notice{position:absolute;bottom:4em;right:var(--pad);max-width:60%;background:#19262d;color:#fff;border-radius:8px;padding:10px}#notice:empty{display:none}button:disabled{opacity:.6}
 @media(min-width:1500px){body{font-size:20px}.settingGroup input{width:24px;height:24px}.grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
 
 #fade{background-repeat:no-repeat;background-position:center}.backgroundSettings{margin-top:24px}.backgroundSettings .field{display:grid;gap:8px}.backgroundSettings .field input{width:100%;height:auto}
+
+/* Keep the scene at display resolution and lay out controls in 1080p coordinates. */
+#interface{position:absolute;inset:0;display:flex;flex-direction:column;container-type:size}
+@media(min-width:1500px){
+  .gear span:last-child,footer,.tile span,.cover span,.card small,.filter,.settingGroup p.note,.faults{font-size:16px}
+  .card b{font-size:18px}
+  kbd{font-size:15px}
+}
+@media(max-height:600px){
+  #stage .details{padding-block:0}
+  .details h1{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+  .details .buttons{margin-block:8px}
+}

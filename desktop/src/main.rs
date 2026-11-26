@@ -34,6 +34,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             discover,
             artwork,
+            search_backgrounds,
+            online_background,
             launch_game,
             get_session,
             registered_apps,

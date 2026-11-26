@@ -1,5 +1,11 @@
 export const words = {ko:{},en:{}};
 const labels = {
+  onlineArt:['온라인 게임 배경','Online game backgrounds'], gameBackground:['게임 배경','Game background'],
+  steamTitle:['Steam 게임 이름','Steam game title'], findSteam:['Steam에서 찾기','Find on Steam'],selectEdition:['설치한 게임과 같은 에디션을 선택하세요.','Select the edition you installed.'],
+  heroUrl:['SteamGridDB Hero 원본 이미지 주소','SteamGridDB original Hero image URL'], applyHero:['이미지 적용','Apply image'],
+  heroOriginal:['SteamGridDB에서 Hero 원본 이미지 주소를 복사하세요.','Copy the original Hero image address from SteamGridDB.'],
+  artUnavailable:['고해상도 배경을 불러오지 못했습니다. 연결과 원본 크기(최소 1920×1080)를 확인하세요.','Could not load an HD background. Check your connection and the original dimensions (at least 1920×1080).'],
+  resetArt:['기본 배경으로 복원','Restore default background'],
   games:['게임','Games'], library:['라이브러리','Library'], settings:['설정','Settings'], play:['플레이','Play'],
   display:['화면·언어','Display & language'], sources:['게임 라이브러리','Game library'], system:['시작·종료','Startup & exit'],
   all:['전체','All'], favorites:['즐겨찾기','Favorites'], edit:['목록 편집','Edit list'], done:['편집 완료','Done editing'],

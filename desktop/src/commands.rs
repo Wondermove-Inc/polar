@@ -4,6 +4,7 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use polar::catalog::{Item, Registration, Report};
+use polar_desktop::pictures::{self, Photo, Source};
 use serde::Serialize;
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
@@ -59,19 +60,27 @@ pub async fn artwork(app: AppHandle, id: String, hero: bool) -> Result<Option<St
         let state = app.state::<Data>();
         let path = state.known.lock().unwrap().get(&id).and_then(|g| {
             if hero {
-                g.hero.clone().or(g.cover.clone())
+                g.hero.clone()
             } else {
                 g.cover.clone()
             }
         });
         let Some(path) = path else { return Ok(None) };
         use std::io::Read;
+        let limit = if hero {
+            pictures::IMAGE_LIMIT
+        } else {
+            4 * 1024 * 1024
+        };
         let mut bytes = Vec::new();
         std::fs::File::open(path)
             .map_err(|e| e.to_string())?
-            .take(4 * 1024 * 1024 + 1)
+            .take(limit as u64 + 1)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
+        if hero {
+            return Ok(Photo::decode(bytes).map(|p| p.data_url()));
+        }
         let mime = if bytes.starts_with(&[255, 216, 255]) {
             "jpeg"
         } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -79,13 +88,48 @@ pub async fn artwork(app: AppHandle, id: String, hero: bool) -> Result<Option<St
         } else {
             return Ok(None);
         };
-        if bytes.len() > 4 * 1024 * 1024 {
+        if bytes.len() > limit {
             return Ok(None);
         }
         Ok(Some(format!(
             "data:image/{mime};base64,{}",
             STANDARD.encode(bytes)
         )))
+    })
+    .await
+}
+
+async fn background_task<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let _slot = SLOTS.acquire().await.map_err(|_| "closed")?;
+    blocking(work).await
+}
+
+#[tauri::command]
+pub async fn search_backgrounds(
+    title: String,
+    lang: String,
+) -> Result<Vec<pictures::SearchHit>, String> {
+    background_task(move || pictures::search(&title, &lang)).await
+}
+
+#[tauri::command]
+pub async fn online_background(
+    app: AppHandle,
+    source: String,
+    online: bool,
+) -> Result<Option<String>, String> {
+    let source = Source::parse(&source).ok_or("source")?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "cache")?
+        .join("backgrounds");
+    background_task(move || {
+        pictures::resolve(&dir, &source, online, &pictures::download)
+            .map(|p| p.map(|photo| photo.data_url()))
     })
     .await
 }

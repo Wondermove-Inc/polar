@@ -1,3 +1,4 @@
+import {decodeBackground, homeBackground} from './background.mjs';
 import {languageFor, libraryView, mergeSource, words} from './model.mjs';
 
 const $=selector=>document.querySelector(selector);
@@ -16,10 +17,19 @@ let library=false,editing=false,filter='all',section='display',modal='',origin=n
 let games=[],tiles=[],scanning=false,launching=false,phase='idle',launchId='',poll=null,hasPad=false;
 let selectedApps=[],draft=null,replaceId=null;
 const reports=new Map(),artCache=new Map();
+let onlineArt=saved.onlineArt!==false;
+const artSources=Object.assign(Object.create(null),saved.artSources);
+const setBackground=homeBackground($('#fade'),invoke);
+function background(refresh=false){
+ const game=games.find(g=>g.id===current);
+ const override=artSources[current]||artSources[game?.alias];
+ const source=override||(/^steam:[1-9]\d*$/.test(current)?current:null);
+ setBackground(library||!game?'':current,source,onlineArt,!!override,refresh);
+}
 const tr=key=>words[lang][key],platform=src=>platformNames[src]||tr('manual');
 const count=n=>tr(n===1?'countOne':'countMany').replace('{n}',new Intl.NumberFormat(lang).format(n));
 function persist(){
-  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites,recent,current,lang,motion,fullscreen}))}
+  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites,recent,current,lang,motion,fullscreen,onlineArt,artSources}))}
   catch{$('#notice').textContent=tr('storage')}
 }
 function button(text,fn,cls='quietBtn'){
@@ -37,18 +47,18 @@ function localize(){
  $('#nav').ariaLabel=tr('mainNav');rail.ariaLabel=tr('recent');$('.filters').ariaLabel=tr('sourceFilter');clock();hints();
 }
 function hue(id){let hash=0;for(const ch of id)hash=(hash*31+ch.charCodeAt(0))|0;return String(Math.abs(hash)%360)}
-function art(id,hero){
- const key=(hero?'h':'c')+id;
+function coverArt(id){
+ const key=id;
  if(!artCache.has(key)){
   // Keep large covers out of the persistent library and bound decoded data in memory.
   if(artCache.size>=48)artCache.delete(artCache.keys().next().value);
-  artCache.set(key,invoke('artwork',{id,hero}).catch(()=>null));
+  artCache.set(key,invoke('artwork',{id,hero:false}).catch(()=>null));
  }
  return artCache.get(key);
 }
 const observer=new IntersectionObserver(entries=>{
  for(const {isIntersecting,target} of entries)if(isIntersecting){
-   observer.unobserve(target);art(target.dataset.art,false).then(image=>{if(image&&target.isConnected)target.style.backgroundImage='url('+image+')'});
+   observer.unobserve(target);coverArt(target.dataset.art).then(image=>{if(image&&target.isConnected)target.style.backgroundImage='url('+image+')'});
  }
 });
 function tile(game,small){
@@ -74,7 +84,7 @@ function select(id,focus=false){
  for(const b of rail.children){const on=b.dataset.id===id;b.classList.toggle('sel',on);b.tabIndex=on?0:-1;b.setAttribute('aria-pressed',String(on));
    if(on&&focus){b.focus({preventScroll:true});b.scrollIntoView({block:'nearest',inline:'nearest'})}
  }
- const layer=$('#fade');layer.style.opacity='0';art(id,true).then(image=>{if(current===id&&image){layer.style.backgroundImage='url('+image+')';layer.style.opacity='1'}});
+ background();
  $('.counter').textContent=count(games.length);
 }
 function render(focus=false){
@@ -91,7 +101,7 @@ function render(focus=false){
  $('.details').hidden=!games.length;$('#homeEmpty').hidden=!!games.length;
  rail.replaceChildren(...tiles.map(g=>tile(g,true)));
  if(current)select(current,!library&&!panel.open&&(focus||wasRail));
- if(!games.length)$('.counter').textContent=count(0);
+ if(!games.length){background();$('.counter').textContent=count(0)}
  if(library){
   $('.filters').replaceChildren(...['all','steam','xbox','epic','favorites'].map(k=>{
    const b=button(platformNames[k]||tr(k),()=>{editing=false;filter=k;render();[...$('.filters').children].find(x=>x.dataset.key===k)?.focus()},'filter');
@@ -109,7 +119,7 @@ $('#home').onclick=()=>switchPage(false);$('#library').onclick=()=>switchPage(tr
 async function loadSource(source){
  let report;
  try{report=await invoke('discover',{source})}catch(e){report={complete:false,warnings:[String(e)],items:[]}}
- reports.set(source,report);rows=mergeSource(rows,source,report);artCache.clear();render();persist();
+ reports.set(source,report);rows=mergeSource(rows,source,report);artCache.clear();render();if(rows.some(g=>g.id===current&&(g.bucket??g.source)===source))background(true);persist();
  if(modal==='settings'&&section==='sources')settingsBody(true);
 }
 async function scan(){
@@ -150,6 +160,10 @@ function settingsBody(keep=false){
   const row=el('div','','languageRow');row.append(el('span',tr('language')),languages);body.append(row,
    prefRow(tr('motion'),toggle(motion,v=>{motion=v;root.classList.toggle('noMotion',v);persist()})),
    prefRow(tr('fullscreen'),toggle(fullscreen,async v=>{await nativeAction('fullscreen',v);fullscreen=v;persist()})));
+  const onlineToggle=toggle(onlineArt,v=>{onlineArt=v;persist();background();settingsBody(true)});
+  onlineToggle.dataset.control='onlineArt';body.append(prefRow(tr('onlineArt'),onlineToggle));
+  const game=games.find(g=>g.id===current);
+  if(game)backgroundSettings(body,game);
  }else if(section==='sources'){
   for(const s of platforms){
    const report=reports.get(s);const r=el('div','','scanRow');
@@ -166,6 +180,52 @@ function settingsBody(keep=false){
   const buttons=el('div','','buttons');for(const k of ['desktop','quit'])buttons.append(button(tr(k),()=>nativeAction(k).catch(error)));body.append(buttons);
  }
  if(key)content.querySelector('[data-control="'+CSS.escape(key)+'"]')?.focus();
+}
+function backgroundSettings(body,game){
+ const group=el('section','','backgroundSettings'), results=el('div','','appList');
+ const status=el('p','','note');status.setAttribute('role','status');
+ const field=el('label',tr('heroUrl'),'field'),input=document.createElement('input');
+ input.type='url';input.placeholder='https://cdn2.steamgriddb.com/hero/…';field.append(input);
+ const searchField=el('label',tr('steamTitle'),'field'),query=document.createElement('input');
+ query.type='text';query.maxLength=180;query.value=game.name;searchField.append(query);
+ group.append(el('h3',tr('gameBackground')+' · '+game.name),searchField);body.append(group);
+ const actions=el('div','','buttons');
+ const find=button(tr('findSteam'),async()=>{
+  find.disabled=true;results.replaceChildren();status.textContent=tr('loading');
+  try{
+   const hits=await invoke('search_backgrounds',{title:query.value.trim(),lang});
+   if(!group.isConnected)return;
+   status.textContent=tr(hits.length?'selectEdition':'noMatches');
+   for(const hit of hits)results.append(button(hit.name+' · '+hit.id,()=>link('steam:'+hit.id)));
+   results.firstElementChild?.focus();
+  }catch{status.textContent=tr('artUnavailable')}finally{find.disabled=!onlineArt}
+ });
+ const apply=button(tr('applyHero'),()=>{
+  const url=input.value.trim();
+  if(!/^https:\/\/cdn2\.steamgriddb\.com\/hero\/[a-fA-F0-9]{32}\.(png|jpg|webp)$/.test(url)){status.textContent=tr('heroOriginal');input.focus();return}
+  link(url);
+ });
+ async function link(source){
+  if(group.inert)return;
+  group.inert=true;status.textContent=tr('loading');
+  try{
+   const image=await decodeBackground(await invoke('online_background',{source,online:onlineArt}));
+   if(!group.isConnected||!panel.open||current!==game.id)return;
+   if(!image){status.textContent=tr('artUnavailable');return}
+   if(game.alias)delete artSources[game.alias];artSources[game.id]=source;
+   persist();background();settingsBody();
+   content.querySelector('[data-control="resetArt"]')?.focus();
+  }catch{status.textContent=tr('artUnavailable')}finally{group.inert=false}
+ }
+ find.disabled=!onlineArt;apply.disabled=!onlineArt;
+ group.append(find,results,field);actions.append(apply);group.append(actions,status);
+ if(artSources[game.id]||artSources[game.alias]){
+  const reset=button(tr('resetArt'),()=>{
+   delete artSources[game.id];if(game.alias)delete artSources[game.alias];
+   persist();background();settingsBody();content.querySelector('[data-control="findArt"]')?.focus();
+  });reset.dataset.control='resetArt';actions.append(reset);
+ }
+ find.dataset.control='findArt';
 }
 $('#settings').onclick=()=>{open('settings',tr('settings'));settingsBody();content.querySelector('.categories [aria-pressed=true]').focus()};
 function removeDialog(m){

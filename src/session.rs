@@ -46,8 +46,32 @@ pub struct Lifetime {
     visible_since: Option<u64>,
     quiet_since: Option<u64>,
     sustained: bool,
+    last_steam_running: Option<u64>,
 }
 impl Lifetime {
+    pub fn observe_with_steam(
+        &mut self,
+        milliseconds: u64,
+        process_alive: bool,
+        steam_running: Option<bool>,
+    ) -> &'static str {
+        if steam_running == Some(true) {
+            self.last_steam_running = Some(milliseconds);
+            // An exact AppID is enough evidence even for very short games.
+            self.sustained = true;
+        } else if steam_running == Some(false) || process_alive {
+            self.last_steam_running = None;
+        } else if let Some(last) = self.last_steam_running {
+            // A registry read failure alone cannot confirm that the game closed.
+            return if milliseconds.saturating_sub(last) < 15_000 {
+                "running"
+            } else {
+                "unknown"
+            };
+        }
+        self.observe(milliseconds, process_alive || steam_running == Some(true))
+    }
+
     pub fn observe(&mut self, milliseconds: u64, alive: bool) -> &'static str {
         if alive {
             let start = *self.visible_since.get_or_insert(milliseconds);

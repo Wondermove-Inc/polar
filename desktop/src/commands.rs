@@ -367,12 +367,16 @@ pub async fn launch_game(app: AppHandle, id: String) -> Result<(), String> {
             };
             (target, None)
         };
+        let steam_app = id.strip_prefix("steam:").and_then(polar::parse_id);
+        let steam_was_running = steam_app.and_then(session::steam_running) == Some(true);
         let before = session::visible();
         native::shell(target.as_ref())?;
         let state = worker.state::<Sessions>();
-        if let Some(root) = root {
+        if root.is_some() || steam_app.is_some() {
             state.phase(serial, "waiting");
-            std::thread::spawn(move || session::monitor(worker, serial, root, before));
+            std::thread::spawn(move || {
+                session::monitor(worker, serial, root, before, steam_app, steam_was_running)
+            });
         } else {
             state.phase(serial, "unknown")
         }

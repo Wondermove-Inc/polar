@@ -53,3 +53,45 @@ fn process_handoffs_do_not_end_the_game_early() {
     assert_eq!(brief.observe(6_000, false), "unknown");
     assert_eq!(Lifetime::default().observe(46_000, false), "unknown");
 }
+
+#[test]
+fn steam_tracks_the_selected_app_without_a_matching_game_window() {
+    use polar::session::Lifetime;
+    let mut game = Lifetime::default();
+    assert_eq!(game.observe_with_steam(0, false, Some(false)), "waiting");
+    assert_eq!(game.observe_with_steam(1_000, false, Some(true)), "running");
+    assert_eq!(game.observe_with_steam(1_450, false, None), "running");
+    assert_eq!(
+        game.observe_with_steam(2_000, false, Some(false)),
+        "running"
+    );
+    assert_eq!(game.observe_with_steam(7_000, false, Some(false)), "ended");
+    assert_eq!(
+        Lifetime::default().observe_with_steam(45_000, false, Some(false)),
+        "unknown"
+    );
+}
+
+#[test]
+fn a_missing_steam_signal_is_not_a_confirmed_exit() {
+    use polar::session::Lifetime;
+    let mut game = Lifetime::default();
+    assert_eq!(game.observe_with_steam(0, false, Some(true)), "running");
+    assert_eq!(game.observe_with_steam(6_000, false, None), "running");
+    assert_eq!(game.observe_with_steam(17_000, false, None), "unknown");
+}
+
+#[test]
+fn steam_handoffs_keep_tracking_a_live_game_process() {
+    use polar::session::Lifetime;
+    let mut game = Lifetime::default();
+    game.observe_with_steam(0, false, Some(true));
+    assert_eq!(game.observe_with_steam(500, false, Some(false)), "running");
+    assert_eq!(game.observe_with_steam(3_000, true, None), "running");
+    assert_eq!(
+        game.observe_with_steam(15_000, true, Some(false)),
+        "running"
+    );
+    assert_eq!(game.observe_with_steam(15_500, false, None), "running");
+    assert_eq!(game.observe_with_steam(20_500, false, None), "ended");
+}

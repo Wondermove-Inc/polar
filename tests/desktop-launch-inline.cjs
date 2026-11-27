@@ -20,6 +20,7 @@ const {chromium}=require('playwright');
       if(!window.approved)await new Promise(r=>window.approve=r);
      }
      if(cmd==='get_session'){
+      if(window.readError){window.readError=false;throw 'interrupted'}
       if(window.delayPoll){window.delayPoll=false;await new Promise(r=>window.releasePoll=r)}
       return window.stale||{phase:window.phase,id:window.gameId,serial:window.serial};
      }
@@ -41,6 +42,9 @@ const {chromium}=require('playwright');
    await page.locator('.tile[data-id="steam:1"]').click();await expectPlay(start);
    await page.evaluate(()=>{window.phase='running';window.dispatchEvent(new Event('focus'))});
    await expectPlay(run);
+   await page.evaluate(()=>{window.readError=true;window.dispatchEvent(new Event('focus'))});
+   await page.waitForFunction(()=>!window.readError);
+   await expectPlay(run);
    await page.evaluate(()=>{window.stale={id:window.gameId,phase:'ended',serial:window.serial-1};window.dispatchEvent(new Event('focus'))});
    await page.waitForTimeout(80);await expectPlay(run);
    await page.evaluate(()=>delete window.stale);
@@ -61,7 +65,9 @@ const {chromium}=require('playwright');
    assert(await page.evaluate(()=>window.calls.some(([c,a])=>c==='open_platform'&&a.source==='steam')));
    await page.locator('.tile[data-id="steam:1"]').click();await expectPlay(idle);assert(!(await launcher.isVisible()));
    await page.locator('.tile[data-id="steam:2"]').click();await page.evaluate(()=>{window.fail=false;window.phase='unknown'});
-   await play.click();await expectPlay(ko?'다시 시도':'Try again');assert(await info.isVisible());
+   await play.click();await expectPlay(idle);
+   assert.equal(await play.getAttribute('aria-disabled'),'false');assert(!(await launcher.isVisible()));
+   await page.waitForFunction(()=>!document.querySelector('#launchStatus').textContent,null,{timeout:6000});
    await page.evaluate(()=>window.phase='waiting');await play.click();await expectPlay(start);
    await page.locator('.tile[data-id="steam:1"]').click();await page.locator('#gameOptions').focus();
    await page.evaluate(()=>{window.phase='ended';window.dispatchEvent(new Event('focus'))});

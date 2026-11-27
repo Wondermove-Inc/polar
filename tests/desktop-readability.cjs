@@ -18,24 +18,47 @@ async function visibleInside(page, selector) {
     rect.x+rect.width<=width+1 && rect.y+rect.height<=height+1, selector + ' outside ' + width + '×' + height);
 }
 
+async function checkTitleInk(page) {
+  const heading = page.locator('.details h1');
+  const box = await heading.boundingBox();
+  // Include pixels outside the element: a locator screenshot would crop both versions.
+  const clip = {x:Math.floor(box.x)-3, y:Math.floor(box.y)-8,
+    width:Math.ceil(box.width)+6, height:Math.ceil(box.height)+16};
+  const painted = await page.screenshot({clip});
+  const reference = await page.addStyleTag({content:'.details h1 { overflow:visible; -webkit-line-clamp:unset }'});
+  try {
+    const unclipped = await heading.boundingBox();
+    assert(Math.abs(box.y-unclipped.y)<1 && Math.abs(box.height-unclipped.height)<1, 'fixture must fit in two lines');
+    assert(painted.equals(await page.screenshot({clip})), (await heading.textContent())+' lost glyph pixels');
+  } finally {
+    await reference.evaluate(element=>element.remove());
+  }
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath:process.env.POLAR_CHROME,args:['--no-sandbox']});
   try {
     for (const lang of ['ko','en']) {
       let reference;
       for (const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[2560,1440,1.5],[1920,1080,2]]) {
-        const page = await browser.newPage({viewport:{width,height},deviceScaleFactor:dpr,locale:lang});
+        const page = await browser.newPage({viewport:{width,height},deviceScaleFactor:dpr,locale:lang,reducedMotion:'reduce'});
         await page.addInitScript(() => {
           window.__TAURI__={core:{invoke:async(cmd,args={})=>{
             if(cmd==='get_options')return {login:false,fullscreen:true};
             if(cmd==='discover')return {complete:true,warnings:[],items:args.source==='steam'?[
-              {source:'steam',id:'steam:10',name:'A Game'},{source:'steam',id:'steam:20',name:'아주 긴 한국어 게임 이름과 확장판에 포함된 모험 이야기'}]:[]};
+              {source:'steam',id:'steam:10',name:'Crusader Kings III'},
+              {source:'steam',id:'steam:15',name:'Crusader Kings III 왕국 Pygmy 왕국 Pygmy'},
+              {source:'steam',id:'steam:20',name:'아주 긴 한국어 게임 이름과 확장판에 포함된 모험 이야기 '.repeat(3).trim()}]:[]};
             return null;
           }}};
         });
         await page.goto(process.env.POLAR_TEST_URL);
         await page.locator('.tile.sel').waitFor();
         await page.waitForFunction(()=>!document.querySelector('#polar').classList.contains('entering'));
+        for (const id of ['steam:10','steam:15']) {
+          await page.locator('.tile[data-id="'+id+'"]').click();
+          await checkTitleInk(page);
+        }
         assert.deepEqual(await page.locator('#fade').boundingBox(),{x:0,y:0,width,height});
         const samples = {};
         for(const target of ['#home','.gear span:last-child','.counter','kbd','#play','.tile.sel']) samples[target]=await measure(page,target);
@@ -61,7 +84,12 @@ async function visibleInside(page, selector) {
           await page.locator('#home').click();
           for(const size of [{width:640,height:420},{width:3440,height:800},{width:1920,height:1080}]){
             await page.setViewportSize(size);
-            await page.locator('.tile').last().click();
+            await page.locator('.tile[data-id="steam:10"]').click();
+            await checkTitleInk(page);
+            await page.locator('.tile[data-id="steam:15"]').click();
+            await checkTitleInk(page);
+            await page.locator('.tile[data-id="steam:20"]').click();
+            assert(await page.locator('h1').evaluate(e=>e.scrollHeight>e.clientHeight), 'long title should be clamped');
             await visibleInside(page,'#play');
             await visibleInside(page,'.counter');
             await page.locator('#settings').click();

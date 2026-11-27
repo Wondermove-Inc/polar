@@ -502,7 +502,7 @@ function launchView(){
  if(own&&active){
   label=phase==='running'?'running':'starting';note=tr(label);
  }else if(own&&phase){
-  label='retry';note=tr(phase);showNote=true;
+  label=phase==='unknown'?'play':'retry';note=tr(phase);showNote=true;
  }else if(active){
   const title=games.find(g=>g.id===launchState.id)?.name||launchState.name;
   note=tr(phase==='running'?'otherRunning':'otherStarting').replace('{game}',()=>title);
@@ -511,7 +511,7 @@ function launchView(){
  play.textContent=tr(label);play.setAttribute('aria-disabled',String(!!active));
  info.classList.toggle('visuallyHidden',!showNote);
  if(info.textContent!==note)info.textContent=note;
- launcher.hidden=!(own&&['failed','unknown','busy'].includes(phase)&&platforms.slice(0,3).includes(game?.source));
+ launcher.hidden=!(own&&['failed','busy'].includes(phase)&&platforms.slice(0,3).includes(game?.source));
 }
 async function pollSession(state){
  if(!state||launchState!==state||state.reading||!['waiting','running'].includes(state.phase))return;
@@ -519,21 +519,26 @@ async function pollSession(state){
  try{
   const snapshot=await invoke('get_session');
   if(launchState!==state)return;
+  state.readErrors=0;
   if((!snapshot.id||snapshot.id===state.id)&&(!Number.isSafeInteger(snapshot.serial)||snapshot.serial>=state.minSerial)){
    if(Number.isSafeInteger(snapshot.serial))state.minSerial=lastSerial=snapshot.serial;
    if(snapshot.phase==='ended')launchState=null;
    else if(snapshot.phase==='requesting')state.phase='waiting';
    else state.phase=['waiting','running','failed','unknown'].includes(snapshot.phase)?snapshot.phase:'unknown';
   }
- }catch{if(launchState===state)state.phase='unknown'}
+ }catch{if(launchState===state&&++state.readErrors>=3)state.phase='unknown'}
  finally{state.reading=false}
  if(launchState&&launchState!==state)return;
  launchView();
  if(inFlight())pollTimer=setTimeout(()=>pollSession(state),800);
+ else if(launchState===state&&state.phase==='unknown'){
+  pollTimer=setTimeout(()=>{if(launchState===state){launchState=null;launchView()}},3500);
+ }
 }
 async function launch(id=current){
  if(!id||inFlight())return;
- const state={id,name:games.find(g=>g.id===id)?.name||id,minSerial:lastSerial+1,phase:'request'};
+ clearTimeout(pollTimer);
+ const state={id,name:games.find(g=>g.id===id)?.name||id,minSerial:lastSerial+1,phase:'request',readErrors:0};
  launchState=state;launchView();
  try{
   await invoke('launch_game',{id});recent=[id,...recent.filter(x=>x!==id)].slice(0,100);persist();
@@ -581,6 +586,28 @@ function present(){
   introTimer=setTimeout(dismissIntro,1000);
  }).catch(e=>{dismissIntro();error(e)});
 }
+function moveLibraryCard(card,key){
+ const backwards=key==='ArrowUp'||key==='ArrowLeft';
+ const sibling=backwards?'previousElementSibling':'nextElementSibling';
+ let next=card[sibling];
+ if(key==='ArrowLeft'||key==='ArrowRight'){
+  if(next?.offsetTop===card.offsetTop)next.focus();
+  return;
+ }
+ while(next&&next.offsetTop===card.offsetTop)next=next[sibling];
+ if(!next){
+  if(backwards)$('.filters [aria-pressed=true]')?.focus();
+  return;
+ }
+ const center=el=>{const r=el.getBoundingClientRect();return r.left+r.width/2};
+ const x=center(card),row=next.offsetTop;
+ let closest=next,distance=Math.abs(center(next)-x);
+ for(next=next[sibling];next&&next.offsetTop===row;next=next[sibling]){
+  const d=Math.abs(center(next)-x);
+  if(d<distance){closest=next;distance=d}
+ }
+ closest.focus();
+}
 function navigate(key){
  const active=document.activeElement;
  if(key==='ContextMenu'&&!panel.open){
@@ -601,6 +628,7 @@ function navigate(key){
   if(key==='ArrowUp'||key==='ArrowDown'){$(key==='ArrowUp'?'#home':'#play').focus();return true}
  }
  if(!key.startsWith('Arrow'))return false;
+ if(!panel.open&&active.parentElement===grid){moveLibraryCard(active,key);return true}
  const controls=[...(panel.open?panel:root).querySelectorAll('button:not(:disabled),input:not(:disabled),select,summary')].filter(b=>b.offsetWidth&&b.tabIndex>=0);
  const r=active.getBoundingClientRect();const h=['ArrowLeft','ArrowRight'].includes(key),sign=['ArrowUp','ArrowLeft'].includes(key)?-1:1;
  let best,score=Infinity;

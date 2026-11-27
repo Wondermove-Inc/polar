@@ -5,7 +5,10 @@ const {chromium}=require('playwright');
  try{
  const page=await browser.newPage({viewport:{width:1920,height:1080},locale:'ko-KR'});
  await page.addInitScript(()=>{
-  const rows=Array.from({length:300},(_,i)=>({id:'steam:'+i,source:'steam',bucket:'steam',name:'Game '+i}));
+  const rows=Array.from({length:300},(_,i)=>{
+   const source=['xbox','steam','steam','steam','xbox','epic','xbox','xbox','steam','xbox','epic','steam','steam','steam','xbox','xbox'][i%16];
+   return {id:source+':'+i,source,bucket:source,name:'Game '+String(i).padStart(3,'0')};
+  });
   localStorage.setItem('polar.desktop.v1',JSON.stringify({rows}));
   window.pad={mapping:'standard',axes:[0,0],buttons:Array.from({length:16},()=>({pressed:false}))};
   Object.defineProperty(navigator,'getGamepads',{value:()=>window.pad?[window.pad]:[]});
@@ -47,8 +50,25 @@ const {chromium}=require('playwright');
  await press(13);assert.equal(await page.evaluate(()=>document.activeElement.type),'file');
  await press(1);assert(await page.locator('.tile.sel').evaluate(e=>document.activeElement===e));
  await press(0);assert(await page.evaluate(()=>window.started));
- assert(!await page.locator('dialog').isVisible());assert.equal(await page.locator('#play').innerText(),'다시 시도');
+ assert(!await page.locator('dialog').isVisible());assert.equal(await page.locator('#play').innerText(),'플레이');
  await press(1);assert(await page.locator('.tile.sel').evaluate(e=>e===document.activeElement));
+ await page.setViewportSize({width:640,height:420});
+ await page.locator('#library').click();
+ const firstCards=page.locator('.grid .card');
+ const positions=await firstCards.evaluateAll(cards=>cards.slice(0,16).map(card=>{
+  const r=card.getBoundingClientRect();return {top:r.top,x:r.left+r.width/2,id:card.dataset.id};
+ }));
+ for(const [index,pos] of positions.entries()){
+  const nextTop=positions.find(p=>p.top>pos.top+1)?.top;
+  if(nextTop===undefined||nextTop===positions.at(-1).top)continue;
+  const nextRow=positions.filter(p=>p.top===nextTop);
+  const closest=Math.min(...nextRow.map(p=>Math.abs(p.x-pos.x)));
+  await firstCards.nth(index).focus();await page.keyboard.press('ArrowDown');
+  const focused=await page.evaluate(()=>document.activeElement.dataset.id);
+  assert(nextRow.some(p=>p.id===focused && Math.abs(p.x-pos.x)<=closest+1),'move to the closest card in the next row');
+ }
+ await firstCards.last().focus();await press(13);
+ assert(await firstCards.last().evaluate(e=>document.activeElement===e),'stay on the final row');
  await page.evaluate(()=>window.pad=null);await page.waitForTimeout(150);
  assert((await page.locator('.footkeys').innerText()).includes('Enter'));
  assert(times.filter(n=>n<3000).length>=9);

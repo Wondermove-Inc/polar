@@ -51,10 +51,14 @@ const {chromium}=require('playwright');
    if(view==='library')await page.locator('#library').click();
    const cards=await page.locator(view==='home'?'.tile':'.card').evaluateAll((buttons,home)=>buttons.map(b=>{
     const r=(home?b:b.querySelector('.cover')).getBoundingClientRect();
-    return {id:b.dataset.id,ratio:r.width/r.height,top:r.top};
+    return {id:b.dataset.id,ratio:r.width/r.height,top:r.top,bottom:r.bottom,caption:b.querySelector('b')?.getBoundingClientRect().top};
    }),view==='home');
    for(const card of cards)assert(Math.abs(card.ratio-(['xbox:fm','shortcut:opaque'].includes(card.id)?1:2/3))<.01,JSON.stringify(card));
    assert(Math.max(...cards.map(c=>c.top))-Math.min(...cards.map(c=>c.top))<1);
+   if(view==='library'){
+    for(const edge of ['bottom','caption'])assert(Math.max(...cards.map(c=>c[edge]))-Math.min(...cards.map(c=>c[edge]))<1,
+     'mixed platform '+edge+' should align');
+   }
   }
   await page.locator('.card[data-id="xbox:fm"]').click({button:'right'});
   assert(await page.locator('.editorGame .cover').evaluate(e=>Math.abs(e.clientWidth-e.clientHeight)<=1));

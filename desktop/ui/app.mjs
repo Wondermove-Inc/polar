@@ -79,6 +79,7 @@ function hints(){
 }
 function localize(){
  document.documentElement.lang=lang;for(const e of document.querySelectorAll('[data-word]'))e.textContent=tr(e.dataset.word);
+ $('#quit').ariaLabel=tr('quit');
  $('#gameOptions').ariaLabel=$('#gameOptions').title=tr('gameEdit');$('#nav').ariaLabel=tr('mainNav');rail.ariaLabel=tr('recent');$('.filters').ariaLabel=tr('sourceFilter');for(const key of ['previousGame','nextGame'])$('#'+key).ariaLabel=tr(key);clock();hints();
 }
 function hue(id){let hash=0;for(const ch of id)hash=(hash*31+ch.charCodeAt(0))|0;return String(Math.abs(hash)%360)}
@@ -292,6 +293,13 @@ function toggle(value,set){
  };return input;
 }
 async function nativeAction(action,enabled=false){return invoke('window_action',{action,enabled})}
+let quitting=false;
+async function quitPolar(){
+ if(quitting)return;
+ quitting=true;
+ try{await nativeAction('quit')}catch(e){error(e)}
+ finally{quitting=false}
+}
 function nativeToggle(action){
  const savedValue=()=>action==='login'?!!login:fullscreen;
  const input=toggle(pendingOptions.get(action)??savedValue(),async enabled=>{
@@ -360,7 +368,8 @@ function settingsBody(keep=false){
   body.append(scanBtn);
  }else{
   body.append(prefRow(tr('login'),nativeToggle('login')));
-  const buttons=el('div','','buttons');for(const k of ['desktop','quit'])buttons.append(button(tr(k),()=>nativeAction(k).catch(error)));body.append(buttons);
+  const buttons=el('div','','buttons');
+  buttons.append(button(tr('desktop'),()=>nativeAction('desktop').catch(error)),button(tr('quit'),quitPolar));body.append(buttons);
  }
  if(focused){
   const restored=content.querySelector('[data-control="'+CSS.escape(focused)+'"]:not(:disabled)');
@@ -473,6 +482,7 @@ function backgroundSettings(body,game,refresh){
  }
 
 }
+$('#quit').onclick=quitPolar;
 $('#settings').onclick=()=>{open('settings',tr('settings'));settingsBody();content.querySelector('.categories [aria-pressed=true]').focus()};
 function removeDialog(m){
  open('remove',tr('removeConfirm'));content.append(el('p',m.name),el('p',tr('localOnly')),button(tr('remove'),async()=>{
@@ -679,6 +689,11 @@ function navigate(key){
   if(key==='ArrowUp'||key==='ArrowDown'){$(key==='ArrowUp'?'#home':'#play').focus();return true}
  }
  if(!key.startsWith('Arrow'))return false;
+ if(!panel.open&&active.closest('header')&&(key==='ArrowLeft'||key==='ArrowRight')){
+  const buttons=[...document.querySelectorAll('header button')];
+  buttons[buttons.indexOf(active)+(key==='ArrowLeft'?-1:1)]?.focus();
+  return true;
+ }
  if(!panel.open&&active.parentElement===grid){moveLibraryCard(active,key);return true}
  const controls=[...(panel.open?panel:root).querySelectorAll('button:not(:disabled),input:not(:disabled),select,summary')].filter(b=>b.offsetWidth&&b.tabIndex>=0);
  const r=active.getBoundingClientRect();const h=['ArrowLeft','ArrowRight'].includes(key),sign=['ArrowUp','ArrowLeft'].includes(key)?-1:1;

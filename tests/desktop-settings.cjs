@@ -9,6 +9,7 @@ const {chromium}=require('playwright');
    await page.addInitScript(motion=>{
     const rows=Array.from({length:120},(_,i)=>({id:'steam:'+i,source:'steam',name:'Game '+i}));
     localStorage.setItem('polar.desktop.v1',JSON.stringify({rows,motion,current:'steam:4'}));
+    window.exitRequests=0;
     window.__TAURI__={core:{invoke:async(cmd,args={})=>{
      if(cmd==='discover'){
       if(args.source==='epic')await new Promise(r=>window.finishScan=r);
@@ -16,6 +17,10 @@ const {chromium}=require('playwright');
      }
      if(cmd==='epic_folders')return Array.from({length:12},(_,i)=>'D:/'+('Games'.repeat(28))+'/'+i);
      if(cmd==='get_options')return new Promise(r=>window.readOptions=()=>r({login:false,fullscreen:false}));
+     if(cmd==='window_action'&&args.action==='quit'){
+      window.exitRequests++;
+      return new Promise((resolve,reject)=>window.finishExit=ok=>ok?resolve():reject('close failed'));
+     }
      if(cmd==='window_action'&&['login','fullscreen'].includes(args.action))
       return new Promise((resolve,reject)=>window.writeOption=ok=>ok?resolve():reject('declined'));
      return null;
@@ -24,6 +29,16 @@ const {chromium}=require('playwright');
    await page.goto(process.env.POLAR_TEST_URL);
    await page.locator('.tile.sel').waitFor();
    const settings=page.locator('#settings'),panel=page.locator('#panel');
+   const quit=page.getByRole('button',{name:locale==='ko-KR'?'Polar 종료':'Exit Polar',exact:true});
+   assert.equal(await quit.count(),1,'the header needs an accessible exit button');
+   const clock=await page.locator('.clock').boundingBox(),exit=await quit.boundingBox();
+   assert(exit.x>=clock.x+clock.width&&exit.x+exit.width<=width);
+   assert(Math.abs(exit.y+exit.height/2-clock.y-clock.height/2)<1.5);
+   await quit.click();await page.keyboard.press('Enter');
+   assert.equal(await page.evaluate(()=>window.exitRequests),1,'deduplicate pending close');
+   await page.evaluate(()=>window.finishExit(false));await page.locator('#notice').filter({hasText:'close failed'}).waitFor();
+   await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.exitRequests),2);
+   await page.evaluate(()=>window.finishExit(true));
    await settings.click();
    await page.waitForFunction(()=>document.querySelector('#panel').getAnimations().every(a=>a.playState!=='running'));
    const rect=await panel.boundingBox();

@@ -18,7 +18,7 @@ const labels = {
   all:['전체','All'], favorites:['즐겨찾기','Favorites'], edit:['목록 편집','Edit list'], done:['편집 완료','Done editing'],
   add:['게임 추가','Add game'], change:['변경','Change'], remove:['목록에서 제거','Remove from list'], save:['저장','Save'],
   language:['언어','Language'], motion:['움직임 줄이기','Reduce motion'], fullscreen:['전체 화면','Full screen'],
-  login:['Windows 로그인 시 시작','Start when I sign in to Windows'], desktop:['바탕 화면으로','Show desktop'], quit:['Polar 종료','Exit Polar'],
+  login:['Windows 로그인 시 시작','Start when I sign in to Windows'], desktop:['바탕 화면으로','Show desktop'], quit:['Polar 종료','Exit Polar'], quitShort:['종료','Exit'],
   scan:['다시 찾기','Scan again'], scanning:['게임을 찾는 중…','Looking for games…'], ready:['탐색 완료','Scan complete'], partial:['일부 경로를 확인할 수 없습니다','Some locations could not be checked'],
   unconfirmed:['설치 상태 미확인','Installation unconfirmed'], empty:['설치된 게임이 아직 없습니다','No installed games yet'],
   emptyHelp:['설치한 게임을 다시 찾거나 기존 바로가기를 추가하세요.','Scan your libraries or add an existing game shortcut.'],

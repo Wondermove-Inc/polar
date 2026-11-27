@@ -12,10 +12,12 @@ const {chromium}=require('playwright');
   localStorage.setItem('polar.desktop.v1',JSON.stringify({rows}));
   window.pad={mapping:'standard',axes:[0,0],buttons:Array.from({length:16},()=>({pressed:false}))};
   Object.defineProperty(navigator,'getGamepads',{value:()=>window.pad?[window.pad]:[]});
-  window.__TAURI__={core:{invoke:async(cmd)=>{
+  window.exitRequests=0;
+  window.__TAURI__={core:{invoke:async(cmd,args)=>{
    if(cmd==='discover')return new Promise(()=>{});
    if(cmd==='get_options')return {fullscreen:true,login:false};
    if(cmd==='launch_game')window.started=true;
+   if(cmd==='window_action'&&args.action==='quit')window.exitRequests++;
    if(cmd==='get_session')return {phase:'unknown'};
    return null;
   }}};
@@ -34,6 +36,15 @@ const {chromium}=require('playwright');
  }
  assert.equal(await page.locator('.tile').count(),300);
  assert.equal(await page.locator('.tile.sel').innerText(),'');
+ await page.waitForFunction(()=>document.querySelector('#intro').hidden);
+ await press(12);
+ for(const id of ['library','settings','quit']){
+  await press(15);assert.equal(await page.evaluate(()=>document.activeElement.id),id);
+ }
+ await press(0);assert.equal(await page.evaluate(()=>window.exitRequests),1);
+ assert(!await page.evaluate(()=>window.started));
+ await press(14);assert.equal(await page.evaluate(()=>document.activeElement.id),'settings');
+ await page.locator('.tile.sel').focus();
  for(let i=0;i<19;i++)await page.keyboard.press('ArrowRight');
  await press(15);
  assert.equal(await page.locator('.tile').nth(20).getAttribute('aria-pressed'),'true');

@@ -51,11 +51,7 @@ CONTROL
     dpkg-deb --build --root-owner-group "$package" "$dist/Polar-$version-linux-x64.deb"
     ;;
   Darwin)
-    case "$(uname -m)" in
-      arm64) arch=arm64 ;;
-      x86_64) arch=x64 ;;
-      *) echo 'Unsupported macOS architecture' >&2; exit 1 ;;
-    esac
+    test "$(uname -m)" = arm64
     app="$stage/volume/Polar.app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     install -m755 "$binary" "$app/Contents/MacOS/Polar"
@@ -80,7 +76,7 @@ PLIST
     codesign --force --sign - "$app"
     ln -s /Applications "$stage/volume/Applications"
     hdiutil create -fs HFS+ -format UDZO -volname Polar -srcfolder "$stage/volume" "$stage/Polar.dmg"
-    mv "$stage/Polar.dmg" "$dist/Polar-$version-macos-$arch.dmg"
+    mv "$stage/Polar.dmg" "$dist/Polar-$version-macos-arm64.dmg"
     ;;
   *) echo 'Run this script on Linux or macOS' >&2; exit 1 ;;
 esac

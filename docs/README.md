@@ -43,7 +43,7 @@ Turn off **Online game artwork** to use local files and previously cached downlo
 
 - Run `cargo test --workspace --locked` for Rust tests and `node --test tests/desktop-model.mjs` for the library model.
 - To exercise the UI in a browser, serve `desktop/ui` locally, set `POLAR_TEST_URL` to that URL, and run the `tests/desktop-*.cjs` scripts with Playwright. These tests supply fixture responses to native commands.
-- On Windows x64, install the Rust MSVC toolchain, Visual Studio C++ Build Tools and NSIS 3, then run `.\packaging\build.ps1`. On Ubuntu x64 or macOS, run `packaging/build-unix.sh` on the target OS. Installers are written to `target/dist`. The repository also includes a separate Windows library diagnostic CLI, available with `cargo run -- list`.
+- On Windows x64, install the Rust MSVC toolchain, Visual Studio C++ Build Tools and NSIS 3, then run `.\packaging\build.ps1`. On Ubuntu x64 or an Apple Silicon Mac, run `packaging/build-unix.sh` on the target OS. Installers are written to `target/dist`. The repository also includes a separate Windows library diagnostic CLI, available with `cargo run -- list`.
 - The icon source is `desktop/ui/polar.svg`. Run `uv run packaging/render-icon.py` to regenerate the native icons. Use `uv run tests/windows-icons.py <Polar.exe> <setup.exe> <Uninstall.exe>` to check the embedded Windows icons.
 
 Native builds, installation checks and release packaging are defined in the [release workflow](../.github/workflows/release.yml). The original [product specification](PRD.md) and [development plan](PLAN.md) are available in Korean.

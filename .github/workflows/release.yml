@@ -33,8 +33,6 @@ jobs:
             suffix: windows-x64-setup.exe
           - os: macos-15
             suffix: macos-arm64.dmg
-          - os: macos-15-intel
-            suffix: macos-x64.dmg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,7 +117,7 @@ jobs:
           set -euo pipefail
           version=${GITHUB_REF_NAME#v}
           files=()
-          for suffix in windows-x64-setup.exe linux-x64.deb macos-arm64.dmg macos-x64.dmg; do
+          for suffix in windows-x64-setup.exe linux-x64.deb macos-arm64.dmg; do
             file="Polar-$version-$suffix"
             test -s "$file"
             files+=("$file")
@@ -129,5 +127,5 @@ jobs:
           if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Polar $version" "${args[@]}" \
-            --notes "Windows x64 (NSIS), Ubuntu 24.04 x64 (.deb), macOS Apple Silicon and Intel (.dmg). Compare your download against SHA256SUMS. Windows is unsigned. The macOS app is ad-hoc signed and has not been notarized." \
+            --notes "Windows x64 (NSIS), Ubuntu 24.04 x64 (.deb), macOS Apple Silicon (.dmg). Compare your download against SHA256SUMS. Windows is unsigned. The macOS app is ad-hoc signed and has not been notarized." \
             "${files[@]}" SHA256SUMS

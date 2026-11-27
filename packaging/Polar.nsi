@@ -45,6 +45,7 @@ FunctionEnd
 !insertmacro Guard "un"
 !macro CleanPayload DIR
   Delete "${DIR}\Polar.exe"
+  Delete "${DIR}\Font-Licenses.txt"
   Delete "${DIR}\WebView2Loader.dll"
   RMDir "${DIR}"
 !macroend
@@ -88,6 +89,7 @@ recovered:
   ClearErrors
   SetOutPath "$INSTDIR\incoming"
   File /oname=Polar.exe "${BINARY}"
+  File /oname=Font-Licenses.txt "../docs/FONT-LICENSES.txt"
   !ifdef LOADER
     File /oname=WebView2Loader.dll "${LOADER}"
   !endif
@@ -105,7 +107,7 @@ installNew:
   CreateDirectory "$SMPROGRAMS\Polar Launcher"
   CreateShortcut "$SMPROGRAMS\Polar Launcher\Polar.lnk" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "DisplayName" "Polar"
-  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "1.0.0-rc.14"
+  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "1.0.0-rc.15"
   WriteRegStr HKCU "${UNKEY}" "DisplayIcon" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   IfErrors failed

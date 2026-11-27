@@ -2,6 +2,23 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
+async function checkFont(page, selector, ...expected) {
+  await page.locator(selector).first().waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send('DOM.enable');
+    await session.send('CSS.enable');
+    const {root} = await session.send('DOM.getDocument');
+    const {nodeId} = await session.send('DOM.querySelector', {nodeId:root.nodeId, selector});
+    const {fonts} = await session.send('CSS.getPlatformFontsForNode', {nodeId});
+    const actual = fonts.filter(face => face.isCustomFont && face.glyphCount > 0).map(face => face.postScriptName);
+    assert.deepEqual(actual.sort(), expected.sort(), selector + ' rendered with ' + JSON.stringify(fonts));
+  } finally {
+    await session.detach();
+  }
+}
+
 async function measure(page, target) {
   return page.locator(target).first().evaluate(element => {
     const range = document.createRange();
@@ -20,6 +37,7 @@ async function visibleInside(page, selector) {
 
 async function checkTitleInk(page) {
   const heading = page.locator('.details h1');
+  await heading.evaluate(element => { element.getBoundingClientRect(); return document.fonts.ready; });
   const box = await heading.boundingBox();
   // Include pixels outside the element: a locator screenshot would crop both versions.
   const clip = {x:Math.floor(box.x)-3, y:Math.floor(box.y)-8,
@@ -59,11 +77,19 @@ async function checkTitleInk(page) {
           await page.locator('.tile[data-id="'+id+'"]').click();
           await checkTitleInk(page);
         }
+        if (!reference) {
+          await checkFont(page, '.details h1', 'Spectral-SemiBold', 'NanumMyeongjoBold');
+          await checkFont(page, '#home', 'GmarketSansTTFBold');
+          await checkFont(page, '.clock', 'GmarketSansTTFMedium');
+          await checkFont(page, '#play', 'GmarketSansTTFBold');
+          await checkFont(page, '.store', 'GmarketSansTTFMedium');
+        }
         assert.deepEqual(await page.locator('#fade').boundingBox(),{x:0,y:0,width,height});
         const samples = {};
         for(const target of ['#home','.gear span:last-child','.counter','kbd','#play','.tile.sel']) samples[target]=await measure(page,target);
         if(!reference) for(const target of ['.gear span:last-child','.counter','kbd']) assert(samples[target].text>=15,target);
         await page.locator('#library').click();
+        if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 'Spectral-SemiBold', 'NanumMyeongjoBold');
         samples.card=await measure(page,'.card b');
         await page.locator('#settings').click();
         samples.settings=await measure(page,'.categories button');

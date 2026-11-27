@@ -1,7 +1,7 @@
 import {importCover,readCover,writeCover} from './custom-cover.mjs';
 import {decodeBackground, homeBackground} from './background.mjs';
 import {folderKey,folderName,mergeLinkedShortcuts,unresolvedFolders} from './epic-pending.mjs';
-import {languageFor, libraryView, mergeSource, words} from './model.mjs';
+import {favoritesFirst, filterGames, isFavorite, languageFor, libraryView, mergeSource, words} from './model.mjs';
 
 const $=selector=>document.querySelector(selector);
 const invoke=(name,args={})=>window.__TAURI__.core.invoke(name,args);
@@ -28,7 +28,18 @@ let saved={};
 try{saved=JSON.parse(localStorage.getItem(stateKey)||'{}')||{}}catch{}
 const epicLinks=Object.assign(Object.create(null),saved.epicLinks);
 let rows=Array.isArray(saved.rows)?saved.rows.filter(g=>g&&typeof g.id==='string'&&typeof g.name==='string'&&platforms.includes(g.source)):[];
-let favorites=Array.isArray(saved.favorites)?saved.favorites:[],recent=Array.isArray(saved.recent)?saved.recent:[];
+// Both a discovered game and its shortcut point to the same saved favorite.
+let favorites=new Map();
+for(const id of Array.isArray(saved.favorites)?saved.favorites:[]){
+ if(typeof id==='string')favorites.set(id,id);
+}
+for(const [alias,id] of Object.entries(saved.favoriteAliases||{})){
+ if(favorites.has(id)&&!favorites.has(alias))favorites.set(alias,id);
+}
+let recent=Array.isArray(saved.recent)?saved.recent:[];
+let preferStartupFavorite=favorites.size>0;
+document.addEventListener('pointerdown',()=>{preferStartupFavorite=false},{capture:true,once:true});
+document.addEventListener('click',()=>{preferStartupFavorite=false},{capture:true,once:true});
 let current=typeof saved.current==='string'?saved.current:'',lang=Object.hasOwn(words,saved.lang)?saved.lang:languageFor(navigator.languages);
 let remembered=current;
 try{remembered=localStorage.getItem('polar.selected')||current;current=remembered}catch{}
@@ -64,7 +75,8 @@ function background(refresh=false){
 const tr=key=>words[lang][key],platform=src=>platformNames[src]||tr('manual');
 const count=n=>tr(n===1?'countOne':'countMany').replace('{n}',new Intl.NumberFormat(lang).format(n));
 function persist(){
-  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites,recent,current,lang,motion,fullscreen,onlineArt,artSources,names,epicLinks}));return true}
+  const favoriteAliases=Object.fromEntries([...favorites].filter(([key,id])=>key!==id));
+  try{localStorage.setItem(stateKey,JSON.stringify({rows,favorites:[...new Set(favorites.values())],favoriteAliases,recent,current,lang,motion,fullscreen,onlineArt,artSources,names,epicLinks}));return true}
   catch{(panel.open?$('#alert'):$('#notice')).textContent=tr('storage');return false}
 }
 function button(text,fn,cls='quietBtn'){
@@ -139,21 +151,43 @@ const observer=new IntersectionObserver(entries=>{
 });
 function tile(game,small){
  const b=button('',()=>{
-   if(!small&&editing){favorite(game.id,b);return}
+   if(!small&&editing){toggleFavorite(game);b.setAttribute('aria-pressed',String(isFavorite(game,favorites)));return}
    if(!small){current=game.id;library=false;render(true)}else select(game.id,true);
  },small?'tile':'card');
  b.dataset.id=game.id;b.ariaLabel=game.name+' · '+platform(game.source);b.style.setProperty('--hue',hue(game.id));
+ if(game.alias)b.dataset.alias=game.alias;
  b.setAttribute('aria-haspopup','dialog');
  b.oncontextmenu=e=>{e.preventDefault();editGame(game,b)};
  if(small){b.tabIndex=-1;b.setAttribute('aria-pressed','false')}
  const cover=small?b:el('div','','cover');cover.dataset.art=game.id;cover.dataset.initials=(game.name.match(/[\p{L}\p{N}]+/gu)||[]).slice(0,2).map(w=>[...w][0]).join('').toLocaleUpperCase(lang);observer.observe(cover);
- if(!small){b.append(cover,el('b',game.name),el('small',platform(game.source)));if(editing)b.setAttribute('aria-pressed',String(favorites.includes(game.id)||favorites.includes(game.alias)))}
+ if(!small){b.append(cover,el('b',game.name),el('small',platform(game.source)));if(editing)b.setAttribute('aria-pressed',String(isFavorite(game,favorites)))}
  return b;
 }
-function favorite(id,b){
- const alias=games.find(g=>g.id===id)?.alias;
- favorites=favorites.includes(id)||favorites.includes(alias)?favorites.filter(x=>x!==id&&x!==alias):[...favorites,id];
- b.setAttribute('aria-pressed',String(favorites.includes(id)));persist();
+function liveFavoriteGame(game){
+ return games.find(g=>g.id===game.id||g.alias===game.id||g.id===game.alias)||game;
+}
+function toggleFavorite(game){
+ const live=liveFavoriteGame(game);
+ const previous=favorites;
+ const keys=[live.id,live.alias,game.id,game.alias].filter(Boolean);
+ const marked=new Set(keys.filter(key=>favorites.has(key)).map(key=>favorites.get(key)));
+ if(marked.size){
+  favorites=new Map([...previous].filter(([,id])=>!marked.has(id)));
+ }else{
+  favorites=new Map(previous);
+  for(const key of keys)favorites.set(key,live.id);
+ }
+ if(!persist())favorites=previous;
+ else{
+  const feedback=panel.open?$('#alert'):$('#notice');
+  if(feedback.textContent===tr('storage'))feedback.textContent='';
+ }
+}
+function updateFavoriteAction(){
+ const action=$('#favoriteAction');
+ if(!action)return;
+ const marked=isFavorite(liveFavoriteGame(action.dataset),favorites)||isFavorite(action.dataset,favorites);
+ action.textContent=tr(marked?'removeFavorite':'addFavorite');
 }
 const pendingEpic=()=>unresolvedFolders(reports.get('epic'),rows,epicLinks);
 function pendingCard(path){
@@ -188,12 +222,23 @@ function select(id,focus=false){
 function render(focus=false){
  const active=document.activeElement,focusId=active?.dataset.id,focusFolder=active?.dataset.epicFolder,wasRail=rail.contains(active),wasGrid=grid.contains(active);
  const linkedRows=mergeLinkedShortcuts(rows,reports.get('epic'),epicLinks);
- observer.disconnect();games=libraryView(linkedRows,'all',favorites,lang,names);
+ observer.disconnect();
+ const alphabetical=libraryView(linkedRows,'all',[],lang,names);
+ for(const {id,alias} of alphabetical){
+  if(!alias)continue;
+  const previous=favorites.get(alias);
+  if(previous&&previous!==alias&&previous!==id)favorites.delete(alias);
+  if(favorites.has(id)||favorites.has(alias)){favorites.set(id,id);favorites.set(alias,id)}
+ }
+ games=favoritesFirst(alphabetical,favorites);
  if(!games.some(g=>g.id===current))current=games.find(g=>g.alias===current)?.id||games[0]?.id||'';
  const byId=new Map(games.map(g=>[g.id,g]));
  const aliases=new Map(games.filter(g=>g.alias).map(g=>[g.alias,g.id]));
  const ordered=[...new Set([...recent.map(id=>aliases.get(id)||id),...byId.keys()])].map(id=>byId.get(id)).filter(Boolean);
- tiles=ordered;
+ tiles=favoritesFirst(ordered,favorites);
+ if(preferStartupFavorite&&tiles.length&&isFavorite(tiles[0],favorites))current=tiles[0].id;
+ if(!firstScan)preferStartupFavorite=false;
+ updateFavoriteAction();
  root.classList.toggle('libOn',library);root.classList.toggle('noMotion',motion);
  for(const [id,on] of [['#library',library],['#home',!library]]){if(on)$(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current')}
  $('#shelf').hidden=rail.hidden=library||!games.length;$('#stage').hidden=library;$('.lib').hidden=!library;
@@ -218,11 +263,17 @@ function render(focus=false){
   }));
   if(!panel.open&&active.matches('.filter'))$('.filter[data-key="'+active.dataset.key+'"]').focus({preventScroll:true});
   $('#edit').hidden=filter!=='favorites';$('#edit').textContent=tr(editing?'done':'edit');
-  const list=libraryView(linkedRows,editing?'all':filter,favorites,lang,names);grid.replaceChildren(...list.map(g=>tile(g,false)));
+  const list=editing?alphabetical:filterGames(games,filter,favorites);
+  grid.replaceChildren(...list.map(g=>tile(g,false)));
   const visiblePending=!editing&&(filter==='all'||filter==='epic')?pending:[];
   grid.append(...visiblePending.map(pendingCard));
   $('.empty').hidden=!!(list.length||visiblePending.length);$('.counter').textContent=libraryCount(list.length,visiblePending.length);
-  if(wasGrid&&!panel.open)([...grid.children].find(b=>focusFolder?b.dataset.epicFolder===focusFolder:b.dataset.id===focusId)||grid.firstElementChild||$('#addLib')).focus();
+  if(wasGrid&&!panel.open){
+   const id=aliases.get(focusId)||focusId;
+   const target=[...grid.children].find(b=>focusFolder?b.dataset.epicFolder===focusFolder:
+    b.dataset.id===id||(active.dataset.alias&&b.dataset.id===active.dataset.alias));
+   (target||grid.firstElementChild||$('#addLib')).focus();
+  }
  }else{grid.replaceChildren();if(focus&&!current)$('#addEmpty').focus()}
 }
 function step(direction){
@@ -266,10 +317,11 @@ function close(){
  const folder=origin?.dataset.epicFolder;
  const linked=folder&&epicLinks[folderKey(folder)];
  const entry=origin?.dataset.id||linked;
- const tileId=entry&&games.find(g=>g.id===entry||g.alias===entry)?.id;
+ const tileId=entry&&games.find(g=>g.id===entry||g.alias===entry||g.id===origin?.dataset.alias)?.id;
  const restored=(tileId&&(library?grid.querySelector('[data-id="'+CSS.escape(tileId)+'"]'):rail.querySelector('.sel')))||
   (library&&folder&&grid.querySelector('[data-epic-folder="'+CSS.escape(folder)+'"]'));
  if(restored){restored.focus({preventScroll:true});if(library)restored.scrollIntoView({block:'nearest',inline:'nearest'})}
+ else if(library&&entry)(grid.firstElementChild||$('.filter[aria-pressed=true]')).focus();
  else if(!library&&current&&!origin?.isConnected){select(current,true)}
  else if(origin?.isConnected)origin.focus();else (library?$('#library'):$('#home')).focus();
  settleRail();
@@ -400,7 +452,10 @@ function editGame(game,trigger){
  const resetName=button(tr('resetName'),()=>saveName(original));resetName.hidden=name.value===original;
  const save=button(tr('saveName'),()=>saveName(name.value.trim()));
  name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();save.click()}};
- nameActions.append(save,resetName);
+ const favoriteAction=button('',()=>{toggleFavorite(game);render()});
+ favoriteAction.id='favoriteAction';favoriteAction.dataset.id=game.id;
+ if(game.alias)favoriteAction.dataset.alias=game.alias;
+ nameActions.append(save,resetName,favoriteAction);
  const art=el('section','','editorCover'),files=el('label',tr('chooseCover'),'filePicker');
  const input=el('input');input.type='file';input.accept='image/png,image/jpeg,image/webp';files.append(input);
  const reset=button(tr('resetCover'),()=>changeCover(null));reset.hidden=true;
@@ -427,7 +482,7 @@ function editGame(game,trigger){
  }
  input.onchange=()=>{if(input.files[0])changeCover(input.files[0])};
  const coverActions=el('div','','buttons');coverActions.append(files,reset);art.append(el('h3',tr('cover')),coverActions);
- summary.append(title,nameActions);main.append(header,art,status);content.append(main);
+ summary.append(title,nameActions);main.append(header,art,status);content.append(main);updateFavoriteAction();
  refresh();readCover(game.id,game.alias).then(data=>{if(data&&main.isConnected)reset.hidden=false}).catch(()=>{});
  backgroundSettings(main,game,refresh);
  const manual=rows.find(row=>row.bucket==='manual'&&(row.id===game.id||row.id===game.alias));
@@ -589,7 +644,7 @@ async function launch(id=current){
  const state={id,name:games.find(g=>g.id===id)?.name||id,minSerial:lastSerial+1,phase:'request',readErrors:0};
  launchState=state;launchView();
  try{
-  await invoke('launch_game',{id});recent=[id,...recent.filter(x=>x!==id)].slice(0,100);persist();
+  await invoke('launch_game',{id});recent=[id,...recent.filter(x=>x!==id)].slice(0,100);persist();render();
   state.phase='waiting';launchView();await pollSession(state);
  }catch(e){
   const busy=String(e)==='busy';
@@ -657,6 +712,7 @@ function moveLibraryCard(card,key){
  closest.focus();
 }
 function navigate(key){
+ preferStartupFavorite=false;
  const active=document.activeElement;
  if(key==='ContextMenu'&&!panel.open){
   const target=active.closest('.tile,.card')||(!library&&rail.querySelector('.sel'));

@@ -16,6 +16,7 @@ const labels = {
   games:['게임','Games'], library:['라이브러리','Library'], settings:['설정','Settings'], play:['플레이','Play'],
   display:['화면·언어','Display & language'], sources:['게임 라이브러리','Game library'], system:['시작','Startup'],
   all:['전체','All'], favorites:['즐겨찾기','Favorites'], edit:['목록 편집','Edit list'], done:['편집 완료','Done editing'],
+  addFavorite:['즐겨찾기에 추가','Add to favorites'], removeFavorite:['즐겨찾기 해제','Remove from favorites'],
   add:['게임 추가','Add game'], change:['변경','Change'], remove:['목록에서 제거','Remove from list'], save:['저장','Save'],
   language:['언어','Language'], motion:['움직임 줄이기','Reduce motion'], fullscreen:['전체 화면','Full screen'],
   login:['Windows 로그인 시 시작','Start when I sign in to Windows'], quit:['Polar 종료','Exit Polar'], quitShort:['종료','Exit'],
@@ -34,7 +35,7 @@ const labels = {
   restore:['선택한 바로가기를 라이브러리에서 변경할 수 있습니다.','You can change the shortcut in your library.'],
   failedAction:['작업을 마치지 못했습니다.','The action could not be completed.'], storage:['라이브러리 상태를 이 기기에 저장하지 못했습니다.','Could not save library state on this device.'],
   loading:['불러오는 중…','Loading…'], countOne:['게임 {n}개','{n} game'], countMany:['게임 {n}개','{n} games'],
-  recent:['최근 게임','Recent games'], section:['설정 항목','Settings sections'], mainNav:['기본 메뉴','Main navigation'],
+  recent:['게임 목록','Games list'], section:['설정 항목','Settings sections'], mainNav:['기본 메뉴','Main navigation'],
   sourceFilter:['플랫폼 필터','Platform filter'], removeConfirm:['이 게임을 Polar 목록에서 제거할까요?','Remove this game from Polar?'],
   localOnly:['목록에서 제거해도 게임 파일은 보존됩니다.','Removing an entry keeps the installed game files.'],
   selectGame:['게임을 선택하세요','Select a game'], manualHelp:['기존 게임 바로가기(.lnk, .url) 또는 Windows에 등록된 앱을 선택하세요.','Choose an existing game shortcut (.lnk, .url) or a registered Windows app.'],
@@ -60,7 +61,21 @@ export function mergeSource(previous,source,report){
   for(const item of report.items)rows.set(source+'|'+item.id,{...item,bucket:source,unconfirmed:false});
   return [...rows.values()];
 }
+export function isFavorite(game,ids){
+  return ids.has(game.id)||ids.has(game.alias);
+}
+export function favoritesFirst(items,ids){
+  if(!ids.size)return items;
+  const first=[],rest=[];
+  for(const game of items)(isFavorite(game,ids)?first:rest).push(game);
+  return first.concat(rest);
+}
+export function filterGames(items,filter,ids){
+  if(filter==='all')return items;
+  return items.filter(game=>filter===game.source||(filter==='favorites'&&isFavorite(game,ids)));
+}
 export function libraryView(items,filter,favorites,locale='en',names={}){
+  const ids=Array.isArray(favorites)?new Set(favorites):favorites;
   const artifacts=new Map();
   for(const game of items){
     if((game.bucket??game.source)!=='epic'||!game.id.startsWith('epic:')||game.unconfirmed)continue;
@@ -75,9 +90,9 @@ export function libraryView(items,filter,favorites,locale='en',names={}){
     const prior=merged.get(game.id);
     if(!prior||game.bucket==='manual'||prior.bucket!=='manual')merged.set(game.id,game);
   }
-  return [...merged.values()].map(game=>{
+  const sorted=[...merged.values()].map(game=>{
     const name=names[game.id]||names[game.alias];
     return typeof name==='string'&&name?{...game,originalName:game.name,name}:game;
-  }).filter(item=>filter==='all'||filter===item.source||(filter==='favorites'&&(favorites.includes(item.id)||favorites.includes(item.alias))))
-    .sort((a,b)=>a.name.localeCompare(b.name,locale)||a.id.localeCompare(b.id));
+  }).sort((a,b)=>a.name.localeCompare(b.name,locale)||a.id.localeCompare(b.id));
+  return favoritesFirst(filterGames(sorted,filter,ids),ids);
 }

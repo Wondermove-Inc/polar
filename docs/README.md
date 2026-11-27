@@ -4,12 +4,18 @@ Polar는 Windows 11 x64용 개인 게임 런처다. Steam, Epic Games, Xbox에�
 
 ## 설치와 사용
 
-1. `Polar-1.0.0-rc.17-windows-x64-setup.exe`를 실행한다. 현재 사용자 계정에 설치된다. WebView2가 없는 PC에서는 설치 프로그램이 Microsoft 다운로드 페이지를 안내한다.
+1. `Polar-1.0.0-rc.18-windows-x64-setup.exe`를 실행한다. 현재 사용자 계정에 설치된다. WebView2가 없는 PC에서는 설치 프로그램이 Microsoft 다운로드 페이지를 안내한다.
 2. 시작 메뉴에서 **Polar**를 연다. 먼저 저장된 목록을 보여준 뒤 세 플랫폼을 각각 탐색한다. 방향키·패드 또는 홈 양쪽의 화살표로 마지막 게임까지 이동하고 확인 버튼이나 Enter로 실행한다. 홈과 라이브러리에서 **설정**을 누르면 오른쪽 패널이 열린다. **닫기**, 바깥 클릭, Esc 또는 패드 뒤로 버튼으로 원래 화면에 복귀한다. 설정의 **게임 라이브러리**에서 플랫폼별 결과와 진단을 확인한다. **시작**에서는 Windows 로그인 시 Polar를 자동으로 열지 선택한다.
 3. Epic은 사용자별 설치 목록(`installations.jsonl`), 기존 중앙 설치 기록, `%ProgramFiles%\Epic Games`, 연결된 로컬 드라이브의 `Epic Games` 폴더를 확인한다. 예를 들어 `D:\Epic Games`와 `E:\Epic Games`는 자동으로 탐색한다. 다른 위치는 **설정 → 게임 라이브러리 → Epic 게임 폴더 추가**에서 설치 폴더나 그 상위 폴더를 지정한다. 게임 자체의 설치 기록(`.egstore`)도 확인한다. 설치 폴더를 발견했지만 실행 ID를 확인할 수 없으면 **라이브러리 → Epic Games**의 해당 폴더에 **바로가기 연결**이 표시된다. Epic 런처에서 그 게임의 바탕 화면 바로가기를 만든 뒤 연결한다. 폴더 연결을 해제해도 게임 파일은 보존된다.
 4. 자동 감지되지 않는 게임은 **라이브러리 → 게임 추가**에서 기존 게임 바로가기 또는 등록 앱을 선택한다. 표시 이름과 플랫폼을 확인한 뒤 저장한다. 홈 또는 라이브러리에서 게임을 우클릭해 이름·표지·배경을 편집한다. 키보드는 Shift+F10, 표준 게임패드는 메뉴 버튼을 사용한다. 홈에서는 플레이 옆의 **•••**로도 연다. 직접 등록한 바로가기는 같은 편집기에서 변경·제거한다.
 5. **플레이**를 누르면 홈에서 같은 버튼이 **시작 중…**으로 바뀐다. Steam은 선택한 App ID의 실행 신호와 게임 프로세스를 확인한다. 게임이 실행되면 **실행 중**, 종료가 확인되면 **플레이**로 돌아온다. 요청을 보냈지만 상태를 확인할 수 없으면 안내가 잠시 표시되고 다시 플레이할 수 있다. 다른 타일로 이동하거나 설정을 열어도 계속 사용할 수 있다. 추가 실행기나 계정 확인 창에서 자동 추적이 어려우면 Alt+Tab으로 돌아올 수 있다.
 6. 홈과 라이브러리 오른쪽 위에는 **시간 → 설정 → 종료** 순서로 표시된다. **종료**를 누르면 Polar가 닫힌다. 업데이트할 때 Polar를 종료한 뒤 새 설치 파일을 실행한다. Windows의 설치된 앱에서 제거할 수 있다. 게임 파일, 세이브와 Polar의 사용자별 데이터는 설치 폴더와 분리된다.
+
+## 즐겨찾기
+
+게임 타일을 우클릭하거나 홈의 **플레이** 옆 **…**를 누른 뒤 **즐겨찾기에 추가**를 선택한다. 같은 자리에서 **즐겨찾기 해제**를 선택할 수 있다. 여러 게임은 **라이브러리 → 즐겨찾기 → 목록 편집**에서 체크한 뒤 **편집 완료**를 누른다.
+
+홈과 라이브러리의 전체·플랫폼 목록은 즐겨찾기를 먼저 표시한다. 앱을 열면 설치된 즐겨찾기 중 첫 게임이 선택된다. 홈에서는 각 그룹에서 최근 실행한 게임이 먼저 나오고, 라이브러리에서는 각 그룹을 게임 이름순으로 표시한다. 목록 편집 중에는 체크하는 동안 같은 위치에서 계속 선택할 수 있도록 이름순으로 표시한다.
 
 ## 화면 크기
 
@@ -29,7 +35,7 @@ Polar는 1920×1080 이상인 가로 스크린샷을 선택한다. 적합한 스
 
 - Rust CLI와 플랫폼 탐색 회귀 시험은 `cargo test --workspace --locked`, UI 모델 시험은 `node --test tests/desktop-model.mjs`로 실행한다.
 - Windows x64 MSVC 환경에서 Rust, Visual Studio C++ 빌드 도구, NSIS 3을 설치한 뒤 `.\packaging\build.ps1`을 실행하면 `target\dist`에 개인 설치 파일이 생성된다. CLI는 별도로 `cargo run -- list`로 실행한다.
-- 브라우저 시험은 `desktop/ui`를 로컬 정적 서버로 연 뒤 해당 주소를 `POLAR_TEST_URL`에 지정하고 Playwright가 설치된 환경에서 `node tests/desktop-ui.cjs`, `node tests/desktop-flows.cjs`, `node tests/desktop-input.cjs`, `node tests/desktop-backdrops.cjs`, `node tests/desktop-readability.cjs`, `node tests/desktop-presentation.cjs`, `node tests/desktop-intro.cjs`, `node tests/desktop-editor.cjs`, `node tests/desktop-epic-pending.cjs`, `node tests/desktop-platform-art.cjs`, `node tests/desktop-art-cache.cjs`, `node tests/desktop-launch-inline.cjs`, `node tests/desktop-settings.cjs`를 실행한다. 이 시험의 네이티브 명령 응답은 fixture다.
+- 브라우저 시험은 `desktop/ui`를 로컬 정적 서버로 연 뒤 해당 주소를 `POLAR_TEST_URL`에 지정하고 Playwright가 설치된 환경에서 `node tests/desktop-ui.cjs`, `node tests/desktop-flows.cjs`, `node tests/desktop-favorites.cjs`, `node tests/desktop-input.cjs`, `node tests/desktop-backdrops.cjs`, `node tests/desktop-readability.cjs`, `node tests/desktop-presentation.cjs`, `node tests/desktop-intro.cjs`, `node tests/desktop-editor.cjs`, `node tests/desktop-epic-pending.cjs`, `node tests/desktop-platform-art.cjs`, `node tests/desktop-art-cache.cjs`, `node tests/desktop-launch-inline.cjs`, `node tests/desktop-settings.cjs`를 실행한다. 이 시험의 네이티브 명령 응답은 fixture다.
 - Rust가 읽는 원본은 Steam 설치 기록과 로컬 앱 종류 캐시, Epic 설치 매니페스트 및 Windows 등록 앱·게임 메타데이터다. Xbox 등록 정보는 Windows 기본 PowerShell로 조회하고 로컬 드라이브의 XboxGames 또는 .GamingRoot가 지정한 설치 위치와 대조한다. Steam 캐시에서 게임 종류가 확인되지 않은 항목은 바로가기로 추가할 수 있다. 수동 항목의 원본은 Rust가 관리하고, UI 캐시와 즐겨찾기·언어는 사용자별 WebView 데이터에 저장한다.
 
 아이콘 원본은 `desktop/ui/polar.svg`이다. 원본을 수정한 뒤 `uv run packaging/render-icon.py`로 Windows ICO를 갱신한다. `uv run tests/windows-icons.py <Polar.exe> <setup.exe> <Uninstall.exe>`는 세 실행 파일에 들어간 아이콘을 확인한다.

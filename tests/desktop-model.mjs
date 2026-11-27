@@ -21,3 +21,11 @@ test('legacy Epic shortcuts merge only with one matching installed artifact',()=
  assert.equal(libraryView([installed,ambiguous,manual],'all',[]).length,3);
  assert.deepEqual(libraryView([installed,{...manual,id:installed.id}],'all',[]).map(x=>x.id),[installed.id]);
 });
+test('all games and platform filters group favorites before other names',()=>{
+ const ids=filter=>libraryView([a,c,b],filter,[b.id,c.id],'en',{[c.id]:'Zulu'}).map(g=>g.id);
+ assert.deepEqual(ids('all'),[b.id,c.id,a.id]);
+ assert.deepEqual(ids('steam'),[b.id,a.id]);
+ const shortcut={id:'epic-short:DS',bucket:'manual',source:'epic',name:'Zulu'};
+ const official={id:'epic:ns:cat:DS',source:'epic',name:'DS'};
+ assert.deepEqual(libraryView([a,official,shortcut],'all',[shortcut.id]).map(g=>g.id),[official.id,a.id]);
+});

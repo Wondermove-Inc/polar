@@ -47,33 +47,44 @@ async function checkFooterCenter(page) {
   }
 }
 
-async function checkKeycapInk(page) {
+async function checkHintInk(page, gamepad) {
   await page.evaluate(() => document.fonts.ready);
-  const keys = page.locator('.footkeys kbd');
-  assert.deepEqual(await keys.allTextContents(), ['← →', 'Enter', 'Esc']);
-  for (const key of await keys.all()) {
-    const pixels = await key.screenshot();
-    const offset = await page.evaluate(async png => {
-      const img = new Image();
-      img.src = 'data:image/png;base64,' + png;
-      await img.decode();
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const {data} = ctx.getImageData(0, 0, img.width, img.height);
+  const footer = page.locator('footer');
+  const pixels = await footer.screenshot();
+  const offsets = await footer.evaluate(async (element, png) => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + png;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width; canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const {data} = ctx.getImageData(0, 0, img.width, img.height);
+    const bounds = element.getBoundingClientRect(), scale = img.width / bounds.width;
+    function center(left, right, threshold) {
       let top = img.height, bottom = -1;
-      for (let i = 0; i < data.length; i += 4) {
-        // White lettering is brighter than the outline on the solid library footer.
-        if (data[i] < 170) continue;
-        const y = Math.floor(i / 4 / img.width);
-        top = Math.min(top, y);
-        bottom = y;
+      for (let y = 0; y < img.height; y++) {
+        for (let x = Math.ceil((left-bounds.left)*scale); x < Math.floor((right-bounds.left)*scale); x++) {
+          if (data[4*(y*img.width+x)] < threshold) continue;
+          top = Math.min(top, y); bottom = y; break;
+        }
       }
-      return bottom < 0 ? Infinity : (top + bottom + 1 - img.height) / 2;
-    }, pixels.toString('base64'));
-    assert(Math.abs(offset) <= 1.5, (await key.innerText()) + ' ink offset: ' + offset + ' device pixels');
+      return bottom < 0 ? NaN : (top+bottom)/2;
+    }
+    return [...element.querySelectorAll('.footkeys > span')].map(hint => {
+      const kbd = hint.querySelector('kbd'), r = kbd.getBoundingClientRect();
+      // On the solid library footer the border is lighter than the backdrop,
+      // and the letters are lighter than the border.
+      const rim = center(r.left, r.right, 70);
+      return {key:kbd.textContent, keyOffset:center(r.left,r.right,170)-rim,
+        labelOffset:center(r.right,hint.getBoundingClientRect().right,170)-rim};
+    });
+  }, pixels.toString('base64'));
+  assert.equal(offsets.length,3);
+  if (!gamepad) assert.deepEqual(offsets.map(item=>item.key), ['← →','Enter','Esc']);
+  for (const {key,keyOffset,labelOffset} of offsets) {
+    if (!gamepad) assert(Math.abs(keyOffset)<=1.5, key+' ink offset: '+keyOffset+' device pixels');
+    assert(Math.abs(labelOffset)<=1.5, 'Action beside '+key+' is offset by '+labelOffset+' device pixels');
   }
 }
 
@@ -157,6 +168,7 @@ async function checkLocalizedLayout(browser) {
       await visibleInside(page,'#play');
       await visibleInside(page,'.counter');
       await page.locator('#library').click();
+      await checkHintInk(page,false);
       const title=page.locator('.card[data-id="steam:1"] b');
       assert.equal(await title.textContent(),longName);
       assert(await title.evaluate(e=>e.scrollWidth<=e.clientWidth+1 && e.offsetHeight>=2*parseFloat(getComputedStyle(e).fontSize)), 'long library title needs two lines within its card');
@@ -185,6 +197,8 @@ async function checkLocalizedLayout(browser) {
         page.on('pageerror', error => console.error(error));
         page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
         await page.addInitScript(() => {
+          const pad = {mapping:'standard',axes:[0,0],buttons:[]};
+          Object.defineProperty(navigator,'getGamepads',{value:()=>window.testPad?[pad]:[]});
           window.__TAURI__={core:{invoke:async(cmd,args={})=>{
             if(cmd==='get_options')return {login:false,fullscreen:true};
             if(cmd==='discover')return {complete:true,warnings:[],items:args.source==='steam'?[
@@ -216,7 +230,13 @@ async function checkLocalizedLayout(browser) {
         await checkFooterCenter(page);
         await page.locator('#library').click();
         await checkFooterCenter(page);
-        await checkKeycapInk(page);
+        await checkHintInk(page,false);
+        await page.bringToFront();
+        await page.evaluate(()=>window.testPad=true);
+        await page.waitForFunction(()=>document.querySelector('.footkeys kbd').textContent==='✥');
+        await checkHintInk(page,true);
+        await page.evaluate(()=>window.testPad=false);
+        await page.locator('.keyboardKey').first().waitFor();
         await checkFooterCenter(page);
         if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 600);
         samples.card=await measure(page,'.card b');

@@ -1,6 +1,6 @@
 [package]
 name = "polar-desktop"
-version = "1.0.0-rc.12"
+version = "1.0.0-rc.13"
 edition = "2024"
 publish = false
 

@@ -141,7 +141,7 @@ function tile(game,small){
    if(!small&&editing){favorite(game.id,b);return}
    if(!small){current=game.id;library=false;render(true)}else select(game.id,true);
  },small?'tile':'card');
- b.dataset.id=game.id;b.title=game.name;b.ariaLabel=game.name+' · '+platform(game.source);b.style.setProperty('--hue',hue(game.id));
+ b.dataset.id=game.id;b.ariaLabel=game.name+' · '+platform(game.source);b.style.setProperty('--hue',hue(game.id));
  b.setAttribute('aria-haspopup','dialog');
  b.oncontextmenu=e=>{e.preventDefault();editGame(game,b)};
  if(small){b.tabIndex=-1;b.setAttribute('aria-pressed','false')}

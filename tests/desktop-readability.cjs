@@ -35,6 +35,16 @@ async function visibleInside(page, selector) {
     rect.x+rect.width<=width+1 && rect.y+rect.height<=height+1, selector + ' outside ' + width + '×' + height);
 }
 
+async function checkFooterCenter(page) {
+  const footer = await page.locator('footer').boundingBox();
+  for (const item of await page.locator('.footkeys, .footkeys kbd, .counter').all()) {
+    const box = await item.boundingBox();
+    const above = box.y - footer.y;
+    const below = footer.y + footer.height - box.y - box.height;
+    assert(Math.abs(above-below) <= 2, (await item.innerText()) + ' has unequal footer margins: ' + above + ', ' + below);
+  }
+}
+
 async function checkTitleInk(page) {
   const heading = page.locator('.details h1');
   await heading.evaluate(element => { element.getBoundingClientRect(); return document.fonts.ready; });
@@ -88,7 +98,9 @@ async function checkTitleInk(page) {
         const samples = {};
         for(const target of ['#home','.gear span:last-child','.counter','kbd','#play','.tile.sel']) samples[target]=await measure(page,target);
         if(!reference) for(const target of ['.gear span:last-child','.counter','kbd']) assert(samples[target].text>=15,target);
+        await checkFooterCenter(page);
         await page.locator('#library').click();
+        await checkFooterCenter(page);
         if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 'Spectral-SemiBold', 'NanumMyeongjoBold');
         samples.card=await measure(page,'.card b');
         await page.locator('#settings').click();
@@ -119,6 +131,7 @@ async function checkTitleInk(page) {
             assert(await page.locator('h1').evaluate(e=>e.scrollHeight>e.clientHeight), 'long title should be clamped');
             await visibleInside(page,'#play');
             await visibleInside(page,'.counter');
+            await checkFooterCenter(page);
             await page.locator('#settings').click();
             await page.locator('#close').scrollIntoViewIfNeeded();
             await visibleInside(page,'#close');

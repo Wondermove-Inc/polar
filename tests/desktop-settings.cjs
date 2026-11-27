@@ -58,7 +58,14 @@ const {chromium}=require('playwright');
    await settings.click();
    const system=page.locator('[data-control=system]'),display=page.locator('[data-control=display]');
    await system.click();
-   const login=page.locator('.settingGroup input');
+   const groupName=locale==='ko-KR'?'시작':'Startup';
+   assert.equal(await panel.locator('.settingGroup').getByRole('button').count(),0,'startup settings should only contain the login option');
+   assert.equal(await system.innerText(),groupName);
+   const login=panel.getByRole('region',{name:groupName,exact:true}).getByRole('checkbox',{name:locale==='ko-KR'?'Windows 로그인 시 시작':'Start when I sign in to Windows',exact:true});
+   await page.keyboard.press('ArrowDown');
+   assert(await login.evaluate(e=>e===document.activeElement));
+   await page.keyboard.press('ArrowUp');
+   assert(await system.evaluate(e=>e===document.activeElement));
    await login.check();await page.evaluate(()=>window.writeOption(true));await page.waitForFunction(()=>!document.querySelector('.settingGroup input').disabled);
    await page.evaluate(()=>window.readOptions());assert(await login.isChecked(),'late startup read overwrote a saved setting');
    for(const ok of [false,true]){

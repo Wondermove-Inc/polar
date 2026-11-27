@@ -368,8 +368,6 @@ function settingsBody(keep=false){
   body.append(scanBtn);
  }else{
   body.append(prefRow(tr('login'),nativeToggle('login')));
-  const buttons=el('div','','buttons');
-  buttons.append(button(tr('desktop'),()=>nativeAction('desktop').catch(error)),button(tr('quit'),quitPolar));body.append(buttons);
  }
  if(focused){
   const restored=content.querySelector('[data-control="'+CSS.escape(focused)+'"]:not(:disabled)');

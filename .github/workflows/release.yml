@@ -52,6 +52,8 @@ jobs:
             test "$GITHUB_REF" = "refs/tags/v$version"
           fi
           echo "POLAR_VERSION=$version" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == macOS ]]; then echo "MACOSX_DEPLOYMENT_TARGET=13.0" >> "$GITHUB_ENV"; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then echo "CARGO_BUILD_TARGET=x86_64-pc-windows-msvc" >> "$GITHUB_ENV"; fi
       - name: Install Linux build and window-test dependencies
         if: runner.os == 'Linux'
         run: |

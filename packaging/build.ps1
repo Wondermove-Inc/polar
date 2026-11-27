@@ -11,7 +11,8 @@ try {
     $setup = Join-Path $dist.FullName "Polar-$version-windows-x64-setup.exe"
     $compiler = Get-Command makensis.exe -ErrorAction SilentlyContinue
     $nsis = if ($compiler) { $compiler.Source } else { Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe' }
-    & $nsis "/DPOLAR_VERSION=$version" "/DOUTPUT=$setup" "/DBINARY=$exe" 'packaging/Polar.nsi'
+    $root = (Get-Location).Path
+    & $nsis /INPUTCHARSET UTF8 "/DPROJECT_ROOT=$root" "/DPOLAR_VERSION=$version" "/DOUTPUT=$setup" "/DBINARY=$exe" (Join-Path $PSScriptRoot 'Polar.nsi')
     if ($LASTEXITCODE) { throw 'Installer packaging failed' }
     Get-FileHash $setup -Algorithm SHA256
 } finally { Pop-Location }

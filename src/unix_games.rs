@@ -1,8 +1,10 @@
 //! Unix desktop launcher integrations. The WebView supplies only catalog IDs.
 use crate::catalog::{Item, Report};
+#[cfg(any(target_os = "linux", test))]
+use std::fs;
 use std::{
     collections::HashSet,
-    env, fs, io,
+    env, io,
     path::{Path, PathBuf},
     process::Command,
 };

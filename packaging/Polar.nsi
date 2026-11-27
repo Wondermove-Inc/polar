@@ -1,6 +1,9 @@
 !ifndef POLAR_VERSION
   !error "Pass the app version as POLAR_VERSION"
 !endif
+!ifndef PROJECT_ROOT
+  !define PROJECT_ROOT ".."
+!endif
 Unicode true
 RequestExecutionLevel user
 !include "MUI2.nsh"
@@ -12,7 +15,7 @@ RequestExecutionLevel user
 Name "Polar"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Polar"
-!define MUI_ICON "../desktop/icons/icon.ico"
+!define MUI_ICON "${PROJECT_ROOT}\desktop\icons\icon.ico"
 !define MUI_UNICON "${MUI_ICON}"
 SetCompressor /SOLID lzma
 !insertmacro MUI_PAGE_INSTFILES
@@ -92,7 +95,7 @@ recovered:
   ClearErrors
   SetOutPath "$INSTDIR\incoming"
   File /oname=Polar.exe "${BINARY}"
-  File /oname=Font-Licenses.txt "../docs/FONT-LICENSES.txt"
+  File /oname=Font-Licenses.txt "${PROJECT_ROOT}\docs\FONT-LICENSES.txt"
   !ifdef LOADER
     File /oname=WebView2Loader.dll "${LOADER}"
   !endif

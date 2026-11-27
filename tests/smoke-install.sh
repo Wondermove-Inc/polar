@@ -38,7 +38,7 @@ case "$(uname -s)" in
     plutil -lint "$app/Info.plist"
     test -s "$app/Resources/Polar.icns"
     test -s "$app/Resources/FONT-LICENSES.txt"
-    lipo -verify_arch "$(uname -m)" "$app/MacOS/Polar"
+    lipo "$app/MacOS/Polar" -verify_arch "$(uname -m)"
     codesign --verify --strict --deep "$work/Polar.app"
     "$app/MacOS/Polar" 2>"$work/stderr" &
     pid=$!
@@ -57,6 +57,7 @@ for _ in 0..<60 {
     }) { exit(0) }
     Thread.sleep(forTimeInterval: 1)
 }
+if let errors = try? String(contentsOfFile: log, encoding: .utf8) { print(errors) }
 exit(1)
 SWIFT
     ;;

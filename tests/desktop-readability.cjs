@@ -93,9 +93,89 @@ async function checkTitleInk(page) {
   }
 }
 
+async function checkLocalizedLayout(browser) {
+  const page = await browser.newPage({viewport:{width:1499,height:820},locale:'ko-KR',reducedMotion:'reduce'});
+  const longName = 'AdventureChronicles'.repeat(8);
+  await page.addInitScript(name => {
+    window.__TAURI__ = {core:{invoke:async (cmd, args={}) => {
+      if (cmd === 'get_options') return {login:false,fullscreen:false};
+      if (cmd === 'epic_folders') return [];
+      if (cmd === 'discover') return {warnings:[],complete:true,items:args.source === 'steam' ? [
+        {source:'steam',id:'steam:1',name}, {source:'steam',id:'steam:2',name:'Crusader Kings III'},
+        {source:'steam',id:'steam:3',name:'Age of Empires IV: Anniversary Edition'}
+      ] : []};
+      if (cmd === 'launch_game') window.runningGame = args.id;
+      if (cmd === 'get_session') return {id:window.runningGame,phase:window.runningGame?'running':'idle',serial:1};
+      if (cmd === 'registered_apps') return [{id:'example',name}];
+      if (cmd === 'window_action' && args.action === 'quit') throw new Error('D:/Games/' + name);
+    }}};
+  }, longName);
+  try {
+    await page.goto(process.env.POLAR_TEST_URL);
+    await page.locator('#play').waitFor();
+    const fontSize = selector => page.locator(selector).first().evaluate(e=>parseFloat(getComputedStyle(e).fontSize));
+    const before = await fontSize('#play');
+    await page.setViewportSize({width:1500,height:820});
+    assert(Math.abs(await fontSize('#play')-before)<1, 'body type jumps when resizing across 1500px');
+    await page.setViewportSize({width:1920,height:1080});
+    assert(await fontSize('#play')<=18 && await fontSize('.details h1')<=56 && await fontSize('#home')<=20, 'home type exceeds the desktop scale');
+    assert((await page.locator('#play').boundingBox()).height>=40, 'Play hit area shrank with the type');
+    await page.locator('#library').click();
+    assert(await fontSize('.libHeading h2')<=36, 'library heading exceeds the desktop scale');
+    const edition=page.locator('.card[data-id="steam:3"] b');
+    assert(await edition.evaluate(e=>e.scrollHeight<=e.clientHeight+1 && e.scrollWidth<=e.clientWidth+1), 'two-line edition name should fit in full');
+    const stores=await page.locator('.card small').evaluateAll(labels=>labels.map(e=>e.getBoundingClientRect().top));
+    assert(Math.max(...stores)-Math.min(...stores)<1, 'store names should align in a mixed row');
+    await page.locator('.card[data-id="steam:2"]').click({button:'right'});
+    await page.locator('#favoriteAction').click();
+    await page.keyboard.press('Escape');
+    await page.locator('.filter[data-key=favorites]').click();
+    assert(await page.locator('.card b').evaluate(e=>e.offsetHeight<2*parseFloat(getComputedStyle(e).fontSize)), 'short titles should use one line in an all-short row');
+    await page.locator('.filter[data-key=all]').click();
+    await page.locator('#home').click();
+    await page.setViewportSize({width:640,height:420});
+    await page.locator('.tile[data-id="steam:1"]').click();
+    await page.locator('#play').click();
+    await page.locator('.tile[data-id="steam:2"]').click();
+    for (const [lang,state] of [['en','Running'], ['ko','실행 중']]) {
+      await page.locator('#settings').click();
+      await page.locator('.languages button[lang='+lang+']').click();
+      assert.equal(await page.locator('html').getAttribute('lang'), lang);
+      const category = page.locator('[data-control=display]');
+      assert((await category.boundingBox()).height<=45, 'settings categories wrap at the supported minimum width');
+      await page.keyboard.press('Escape');
+      const status = page.locator('#launchStatus');
+      await page.waitForFunction(s=>document.querySelector('#launchStatus').textContent.toLowerCase().includes(s.toLowerCase()),state);
+      assert(await status.evaluate((e, state) => {
+        const node=e.firstChild, start=node.textContent.toLowerCase().indexOf(state.toLowerCase());
+        const range=document.createRange();range.setStart(node,start);range.setEnd(node,start+state.length);
+        const r=range.getBoundingClientRect(), box=e.getBoundingClientRect();
+        return r.left>=box.left-1 && r.right<=box.right+1 && r.bottom<=box.bottom+1;
+      },state), 'running status is obscured by the long game name in '+lang);
+      await visibleInside(page,'#play');
+      await visibleInside(page,'.counter');
+      await page.locator('#library').click();
+      const title=page.locator('.card[data-id="steam:1"] b');
+      assert.equal(await title.textContent(),longName);
+      assert(await title.evaluate(e=>e.scrollWidth<=e.clientWidth+1 && e.offsetHeight>=2*parseFloat(getComputedStyle(e).fontSize)), 'long library title needs two lines within its card');
+      await page.locator('#addLib').click();
+      await page.getByRole('button',{name:lang==='en'?'Registered Windows apps':'Windows 등록 앱'}).click();
+      await page.locator('.appList button').waitFor();
+      assert(await page.locator('.appList').evaluate(e=>e.scrollWidth<=e.clientWidth+1), 'registered app result scrolls horizontally');
+      await page.keyboard.press('Escape');
+      await page.locator('#home').click();
+    }
+    await page.locator('#quit').click();
+    const notice=page.locator('#notice');
+    await notice.waitFor();
+    assert(await notice.evaluate(e=>e.scrollWidth<=e.clientWidth+1), 'long native error escapes its notice');
+  } finally { await page.close(); }
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath:process.env.POLAR_CHROME,args:['--no-sandbox']});
   try {
+    await checkLocalizedLayout(browser);
     for (const lang of ['ko','en']) {
       let reference;
       for (const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[2560,1440,1.5],[1920,1080,2]]) {

@@ -29,7 +29,7 @@ const labels = {
   choose:['선택','Select'], close:['닫기','Close'], back:['뒤로','Back'], move:['이동','Move'], lower:['하단 버튼','Lower button'], right:['오른쪽 버튼','Right button'],
   title:['게임 이름','Game title'], platform:['플랫폼','Platform'], appFilter:['앱 이름 검색','Find an app'], cancel:['취소','Cancel'],
   starting:['시작 중…','Starting…'], running:['실행 중','Running'],
-  otherStarting:['{game} 시작 중…','Starting {game}…'],otherRunning:['{game} 실행 중','{game} is running'],otherGame:['다른 게임','Another game'],
+  otherStarting:['시작 중 · {game}','Starting · {game}'],otherRunning:['실행 중 · {game}','Running · {game}'],otherGame:['다른 게임','Another game'],
   unknown:['실행 요청을 보냈습니다. 게임 상태를 확인할 수 없습니다.','Launch requested. Game status is unavailable.'],
   failed:['게임을 시작할 수 없습니다. 설치 상태를 확인하세요.','Could not start this game. Check its installation.'],
   busy:['다른 게임 실행 요청을 처리 중입니다.','Another launch is in progress.'], retry:['다시 시도','Try again'], home:['홈으로','Return home'],

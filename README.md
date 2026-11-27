@@ -8,13 +8,13 @@ A desktop launcher for the games you already have installed. Browse Steam, Epic 
 
 | Operating system | Installer | Supported libraries |
 | --- | --- | --- |
-| Windows 11 · x64 | [Download for Windows](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.21/Polar-1.0.0-rc.21-windows-x64-setup.exe) | Steam, Epic Games Launcher, PC Game Pass |
-| Ubuntu 24.04 · x64 | [Download the .deb](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.21/Polar-1.0.0-rc.21-linux-x64.deb) | Steam, Epic games installed through Heroic |
-| macOS 13+ · Apple Silicon | [Download for Apple Silicon](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.21/Polar-1.0.0-rc.21-macos-arm64.dmg) | Steam, Epic Games Launcher |
+| Windows 11 · x64 | [Download for Windows](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.22/Polar-1.0.0-rc.22-windows-x64-setup.exe) | Steam, Epic Games Launcher, PC Game Pass |
+| Ubuntu 24.04 · x64 | [Download the .deb](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.22/Polar-1.0.0-rc.22-linux-x64.deb) | Steam, Epic games installed through Heroic |
+| macOS 13+ · Apple Silicon | [Download for Apple Silicon](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.22/Polar-1.0.0-rc.22-macos-arm64.dmg) | Steam, Epic Games Launcher |
 
-On **Windows**, quit Polar and run the installer to install or update it. On **Ubuntu**, run `sudo apt install ./Polar-1.0.0-rc.21-linux-x64.deb` from the download directory. On **Mac**, open the disk image and drag Polar into **Applications**.
+On **Windows**, quit Polar and run the installer to install or update it. On **Ubuntu**, run `sudo apt install ./Polar-1.0.0-rc.22-linux-x64.deb` from the download directory. On **Mac**, open the disk image and drag Polar into **Applications**.
 
-RC21 is a release candidate. The Windows installer is unsigned. The Mac app is ad-hoc signed and has not been notarized by Apple. [Release notes and SHA-256 checksums](https://github.com/Wondermove-Inc/polar/releases/tag/v1.0.0-rc.21)
+RC22 is a release candidate. The Windows installer is unsigned. The Mac app is ad-hoc signed and has not been notarized by Apple. [Release notes and SHA-256 checksums](https://github.com/Wondermove-Inc/polar/releases/tag/v1.0.0-rc.22)
 
 ## Your library
 

@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
-async function checkFont(page, selector, ...expected) {
+async function checkFont(page, selector, weight) {
   await page.locator(selector).first().waitFor();
   await page.evaluate(() => document.fonts.ready);
   const session = await page.context().newCDPSession(page);
@@ -12,8 +12,10 @@ async function checkFont(page, selector, ...expected) {
     const {root} = await session.send('DOM.getDocument');
     const {nodeId} = await session.send('DOM.querySelector', {nodeId:root.nodeId, selector});
     const {fonts} = await session.send('CSS.getPlatformFontsForNode', {nodeId});
-    const actual = fonts.filter(face => face.isCustomFont && face.glyphCount > 0).map(face => face.postScriptName);
-    assert.deepEqual(actual.sort(), expected.sort(), selector + ' rendered with ' + JSON.stringify(fonts));
+    const painted = fonts.filter(face => face.glyphCount > 0);
+    assert(painted.length && painted.every(face => face.isCustomFont && /^Pretendard( Variable)?$/.test(face.familyName)),
+      selector + ' rendered with ' + JSON.stringify(fonts));
+    assert.equal(await page.locator(selector).first().evaluate(e => getComputedStyle(e).fontWeight), String(weight), selector);
   } finally {
     await session.detach();
   }
@@ -200,11 +202,12 @@ async function checkLocalizedLayout(browser) {
           await checkTitleInk(page);
         }
         if (!reference) {
-          await checkFont(page, '.details h1', 'Spectral-SemiBold', 'NanumMyeongjoBold');
-          await checkFont(page, '#home', 'GmarketSansTTFBold');
-          await checkFont(page, '.clock', 'GmarketSansTTFMedium');
-          await checkFont(page, '#play', 'GmarketSansTTFBold');
-          await checkFont(page, '.store', 'GmarketSansTTFMedium');
+          await checkFont(page, '.details h1', 600);
+          await checkFont(page, '#home', 500);
+          await checkFont(page, '.clock', 500);
+          await checkFont(page, '#play', 500);
+          await checkFont(page, '.store', 500);
+          await checkFont(page, '.counter', 400);
         }
         assert.deepEqual(await page.locator('#fade').boundingBox(),{x:0,y:0,width,height});
         const samples = {};
@@ -215,10 +218,17 @@ async function checkLocalizedLayout(browser) {
         await checkFooterCenter(page);
         await checkKeycapInk(page);
         await checkFooterCenter(page);
-        if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 'Spectral-SemiBold', 'NanumMyeongjoBold');
+        if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 600);
         samples.card=await measure(page,'.card b');
         await page.locator('#settings').click();
         samples.settings=await measure(page,'.categories button');
+        if (!reference) {
+          await checkFont(page, '#panel h2', 600);
+          await checkFont(page, '.categories button[aria-pressed=true]', 500);
+          await page.locator('[data-control=sources]').click();
+          await checkFont(page, '.settingGroup p.note', 400);
+          await checkFont(page, '.settingGroup h3', 600);
+        }
         const drawer=await page.locator('#panel').boundingBox();
         assert(drawer.x>width/2 && Math.abs(drawer.x+drawer.width-width)<1 && drawer.y===0 && Math.abs(drawer.height-height)<1);
         await page.locator('#close').scrollIntoViewIfNeeded();

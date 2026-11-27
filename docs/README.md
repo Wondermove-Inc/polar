@@ -4,7 +4,7 @@ This guide covers the Windows 11 desktop app. For Ubuntu and macOS packages and 
 
 ## Getting started on Windows
 
-1. Run `Polar-1.0.0-rc.19-windows-x64-setup.exe`. The installer uses your Windows user account. If the WebView2 Runtime is missing, the installer directs you to Microsoft’s download page.
+1. Run `Polar-1.0.0-rc.20-windows-x64-setup.exe`. The installer uses your Windows user account. If the WebView2 Runtime is missing, the installer directs you to Microsoft’s download page.
 2. Open **Polar** from the Start menu. Polar shows your saved library while it scans Steam, Epic Games and PC Game Pass. Move through games with the arrow keys, the onscreen arrows, or a controller. Press Enter or the controller’s confirm button to play.
 3. Open **Settings → Game library** to see how many games each launcher found and read scan details. Use **Settings → Startup** to launch Polar at Windows sign-in. Close the settings drawer with **Close**, an outside click, Esc or the controller’s back button.
 4. To update, quit Polar using the button next to Settings, then run the new installer. To uninstall, use **Installed apps** in Windows Settings. Polar stores its user data separately from the installation directory and from your games and saves.

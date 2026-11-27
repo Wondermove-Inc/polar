@@ -89,7 +89,16 @@ function error(e){const target=panel.open?$('#alert'):$('#notice');target.textCo
 function clock(){$('.clock').textContent=new Intl.DateTimeFormat(lang,{hour:'numeric',minute:'2-digit'}).format(new Date())}
 function hints(){
   const keys=hasPad?['✥',tr('lower'),tr('right')]:['← →','Enter','Esc'];
-  $('.footkeys').replaceChildren(...['move','choose','back'].map((k,i)=>{const s=el('span');s.append(el('kbd',keys[i]),' '+tr(k));return s}));
+  $('.footkeys').replaceChildren(...['move','choose','back'].map((label,i)=>{
+    const hint=el('span'),cap=el('kbd');
+    if(hasPad)cap.textContent=keys[i];
+    else{
+      cap.className='keyboardKey';
+      cap.append(el('span',keys[i]));
+    }
+    hint.append(cap,' '+tr(label));
+    return hint;
+  }));
 }
 function localize(){
  document.documentElement.lang=lang;for(const e of document.querySelectorAll('[data-word]'))e.textContent=tr(e.dataset.word);

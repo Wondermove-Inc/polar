@@ -58,6 +58,8 @@ h1{font-weight:600}#homeEmpty{margin:auto 0;padding:20px var(--pad)}.cover{displ
 
 /* Keep the scene at display resolution and lay out controls in 1080p coordinates. */
 #interface{position:absolute;inset:0;display:flex;flex-direction:column;container-type:size}
+.keyboardKey{display:inline-grid;place-items:center;vertical-align:middle;height:1.4em;padding-block:0;line-height:1}
+.keyboardKey>span{text-box:trim-both cap alphabetic}
 @media(min-width:1500px){
   .gear span:last-child,footer,.card small,.filter,.settingGroup p.note,.faults{font-size:16px}
   .card b{font-size:18px}

@@ -45,6 +45,36 @@ async function checkFooterCenter(page) {
   }
 }
 
+async function checkKeycapInk(page) {
+  await page.evaluate(() => document.fonts.ready);
+  const keys = page.locator('.footkeys kbd');
+  assert.deepEqual(await keys.allTextContents(), ['← →', 'Enter', 'Esc']);
+  for (const key of await keys.all()) {
+    const pixels = await key.screenshot();
+    const offset = await page.evaluate(async png => {
+      const img = new Image();
+      img.src = 'data:image/png;base64,' + png;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const {data} = ctx.getImageData(0, 0, img.width, img.height);
+      let top = img.height, bottom = -1;
+      for (let i = 0; i < data.length; i += 4) {
+        // White lettering is brighter than the outline on the solid library footer.
+        if (data[i] < 170) continue;
+        const y = Math.floor(i / 4 / img.width);
+        top = Math.min(top, y);
+        bottom = y;
+      }
+      return bottom < 0 ? Infinity : (top + bottom + 1 - img.height) / 2;
+    }, pixels.toString('base64'));
+    assert(Math.abs(offset) <= 1.5, (await key.innerText()) + ' ink offset: ' + offset + ' device pixels');
+  }
+}
+
 async function checkTitleInk(page) {
   const heading = page.locator('.details h1');
   await heading.evaluate(element => { element.getBoundingClientRect(); return document.fonts.ready; });
@@ -100,6 +130,8 @@ async function checkTitleInk(page) {
         if(!reference) for(const target of ['.gear span:last-child','.counter','kbd']) assert(samples[target].text>=15,target);
         await checkFooterCenter(page);
         await page.locator('#library').click();
+        await checkFooterCenter(page);
+        await checkKeycapInk(page);
         await checkFooterCenter(page);
         if (!reference) await checkFont(page, '.card[data-id="steam:15"] b', 'Spectral-SemiBold', 'NanumMyeongjoBold');
         samples.card=await measure(page,'.card b');

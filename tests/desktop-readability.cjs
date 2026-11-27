@@ -100,6 +100,8 @@ async function checkTitleInk(page) {
       let reference;
       for (const [width,height,dpr] of [[1920,1080,1],[3840,2160,1],[2560,1440,1.5],[1920,1080,2]]) {
         const page = await browser.newPage({viewport:{width,height},deviceScaleFactor:dpr,locale:lang,reducedMotion:'reduce'});
+        page.on('pageerror', error => console.error(error));
+        page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
         await page.addInitScript(() => {
           window.__TAURI__={core:{invoke:async(cmd,args={})=>{
             if(cmd==='get_options')return {login:false,fullscreen:true};

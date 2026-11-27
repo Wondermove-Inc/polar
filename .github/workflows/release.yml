@@ -82,7 +82,13 @@ jobs:
           export NODE_PATH="$RUNNER_TEMP/polar-ui/node_modules"
           export POLAR_CHROME="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
           export POLAR_TEST_URL="http://127.0.0.1:38123/"
-          python -m http.server 38123 --bind 127.0.0.1 --directory desktop/ui > "$RUNNER_TEMP/polar-ui-server.log" 2>&1 &
+          python - <<'PY' > "$RUNNER_TEMP/polar-ui-server.log" 2>&1 &
+          from functools import partial
+          from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+          SimpleHTTPRequestHandler.extensions_map[".mjs"] = "text/javascript"
+          handler = partial(SimpleHTTPRequestHandler, directory="desktop/ui")
+          ThreadingHTTPServer(("127.0.0.1", 38123), handler).serve_forever()
+          PY
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
           curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "$POLAR_TEST_URL" -o /dev/null

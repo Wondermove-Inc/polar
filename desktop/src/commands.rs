@@ -1,21 +1,33 @@
+use crate::native;
+#[cfg(windows)]
 use crate::{
-    native::{self, Approved, Manual},
+    native::{Approved, Manual},
     session::{self, Session, Sessions},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use polar::catalog::{Item, Registration, Report};
+#[cfg(windows)]
+use polar::catalog::Registration;
+use polar::catalog::{Item, Report};
+#[cfg(not(windows))]
+use polar::session::{Session, Sessions};
 use polar_desktop::pictures::{self, Photo, Source};
+#[cfg(windows)]
 use serde::Serialize;
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+#[cfg(windows)]
+use std::path::PathBuf;
+use std::{collections::HashMap, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
 pub struct Data {
     pub presented: std::sync::atomic::AtomicBool,
     pub known: Mutex<HashMap<String, Item>>,
+    #[cfg(windows)]
     pub writes: Mutex<()>,
+    #[cfg(windows)]
     pub pending: Mutex<Option<Manual>>,
 }
+#[cfg(windows)]
 fn file(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -37,6 +49,7 @@ pub async fn discover(
     linked_folders: Option<Vec<String>>,
 ) -> Result<Report, String> {
     blocking(move || {
+        #[cfg(windows)]
         if source == "manual" {
             let entries = native::read_manual(&file(&app)?)?;
             return Ok(Report {
@@ -44,7 +57,7 @@ pub async fn discover(
                 ..Report::ok()
             });
         }
-        if !["steam", "epic", "xbox"].contains(&source.as_str()) {
+        if !(matches!(source.as_str(), "steam" | "epic") || (cfg!(windows) && source == "xbox")) {
             return Err("source".into());
         }
         let mut report = native::source(&source);
@@ -136,12 +149,22 @@ pub async fn online_cover(app: AppHandle, id: u32, online: bool) -> Result<Optio
     cover_image(app, Source::Cover(id), online).await
 }
 
+#[cfg(target_os = "linux")]
+async fn epic_catalog_id(id: String) -> Result<String, String> {
+    if id.starts_with("epic:heroic:") {
+        return blocking(move || Ok(native::artwork_id(&id))).await;
+    }
+    Ok(id)
+}
+
 #[tauri::command]
 pub async fn epic_cover(
     app: AppHandle,
     id: String,
     online: bool,
 ) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    let id = epic_catalog_id(id).await?;
     cover_image(app, Source::epic(&id, false).ok_or("source")?, online).await
 }
 
@@ -170,6 +193,8 @@ pub async fn online_background(
     source: String,
     online: bool,
 ) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    let source = epic_catalog_id(source).await?;
     let source = Source::parse(&source)
         .or_else(|| Source::epic(&source, true))
         .ok_or("source")?;
@@ -192,6 +217,7 @@ pub async fn online_background(
     }
 }
 
+#[cfg(windows)]
 #[tauri::command]
 pub async fn epic_folders(
     app: AppHandle,
@@ -232,10 +258,12 @@ pub async fn epic_folders(
     .await
 }
 
+#[cfg(windows)]
 #[tauri::command]
 pub async fn registered_apps() -> Result<Vec<Registration>, String> {
     blocking(|| native::registrations(false)).await
 }
+#[cfg(windows)]
 #[tauri::command]
 pub async fn pick_shortcut(app: AppHandle) -> Result<Option<Item>, String> {
     blocking(move || {
@@ -265,6 +293,7 @@ pub async fn pick_shortcut(app: AppHandle) -> Result<Option<Item>, String> {
     })
     .await
 }
+#[cfg(windows)]
 #[tauri::command]
 pub async fn save_manual(
     app: AppHandle,
@@ -320,6 +349,7 @@ pub async fn save_manual(
     })
     .await
 }
+#[cfg(windows)]
 #[tauri::command]
 pub fn remove_manual(app: AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<Data>();
@@ -333,70 +363,82 @@ pub fn remove_manual(app: AppHandle, id: String) -> Result<(), String> {
 pub async fn launch_game(app: AppHandle, id: String) -> Result<(), String> {
     let serial = app.state::<Sessions>().start(&id)?;
     let worker = app.clone();
-    let outcome = blocking(move || {
-        let source = id.split(':').next().unwrap_or("");
-        let item = if ["steam", "xbox", "epic"].contains(&source) {
-            native::source(source)
-                .items
-                .into_iter()
-                .find(|g| g.id == id)
-        } else {
-            None
-        };
-        let (target, root) = if let Some(game) = item {
-            (game.target, Some(game.root))
-        } else {
-            let entry = native::read_manual(&file(&worker)?)?
-                .into_iter()
-                .find(|m| m.id == id)
-                .ok_or("missing")?;
-            let target = match entry.approved {
-                Approved::Shortcut(path) => {
-                    let (current, target) = native::shortcut(&path)?;
-                    if current != entry.id {
-                        return Err("changed".into());
-                    }
-                    target
-                }
-                Approved::App(id) => {
-                    if !native::registrations(false)?.iter().any(|r| r.id == id) {
-                        return Err("missing".into());
-                    }
-                    format!("shell:AppsFolder\\{id}")
-                }
-            };
-            (target, None)
-        };
-        let steam_app = id.strip_prefix("steam:").and_then(polar::parse_id);
-        let steam_was_running = steam_app.and_then(session::steam_running) == Some(true);
-        let before = session::visible();
-        native::shell(target.as_ref())?;
-        let state = worker.state::<Sessions>();
-        if root.is_some() || steam_app.is_some() {
-            state.phase(serial, "waiting");
-            std::thread::spawn(move || {
-                session::monitor(worker, serial, root, before, steam_app, steam_was_running)
-            });
-        } else {
-            state.phase(serial, "unknown")
-        }
-        Ok(())
-    })
-    .await;
+    let outcome = blocking(move || dispatch(worker, serial, id)).await;
     if outcome.is_err() {
         app.state::<Sessions>().phase(serial, "failed")
     }
     outcome
 }
+
+#[cfg(not(windows))]
+fn dispatch(worker: AppHandle, serial: u64, id: String) -> Result<(), String> {
+    let game = native::launch(&id)?;
+    worker.state::<Sessions>().phase(serial, "waiting");
+    std::thread::spawn(move || native::monitor(worker, serial, game));
+    Ok(())
+}
+
+#[cfg(windows)]
+fn dispatch(worker: AppHandle, serial: u64, id: String) -> Result<(), String> {
+    let source = id.split(':').next().unwrap_or("");
+    let item = if ["steam", "xbox", "epic"].contains(&source) {
+        native::source(source)
+            .items
+            .into_iter()
+            .find(|g| g.id == id)
+    } else {
+        None
+    };
+    let (target, root) = if let Some(game) = item {
+        (game.target, Some(game.root))
+    } else {
+        let entry = native::read_manual(&file(&worker)?)?
+            .into_iter()
+            .find(|m| m.id == id)
+            .ok_or("missing")?;
+        let target = match entry.approved {
+            Approved::Shortcut(path) => {
+                let (current, target) = native::shortcut(&path)?;
+                if current != entry.id {
+                    return Err("changed".into());
+                }
+                target
+            }
+            Approved::App(id) => {
+                if !native::registrations(false)?.iter().any(|r| r.id == id) {
+                    return Err("missing".into());
+                }
+                format!("shell:AppsFolder\\{id}")
+            }
+        };
+        (target, None)
+    };
+    let steam_app = id.strip_prefix("steam:").and_then(polar::parse_id);
+    let steam_was_running = steam_app.and_then(session::steam_running) == Some(true);
+    let before = session::visible();
+    native::shell(target.as_ref())?;
+    let state = worker.state::<Sessions>();
+    if root.is_some() || steam_app.is_some() {
+        state.phase(serial, "waiting");
+        std::thread::spawn(move || {
+            session::monitor(worker, serial, root, before, steam_app, steam_was_running)
+        });
+    } else {
+        state.phase(serial, "unknown")
+    }
+    Ok(())
+}
 #[tauri::command]
 pub fn get_session(s: State<'_, Sessions>) -> Session {
     s.snapshot()
 }
+#[cfg(windows)]
 #[derive(Serialize)]
 pub struct Options {
     fullscreen: bool,
     login: bool,
 }
+#[cfg(windows)]
 #[tauri::command]
 pub fn get_options(window: tauri::WebviewWindow) -> Result<Options, String> {
     Ok(Options {
@@ -418,11 +460,15 @@ pub fn window_action(
                 .state::<Data>()
                 .presented
                 .store(true, std::sync::atomic::Ordering::Release);
+            if mode.is_ok() && std::env::var_os("POLAR_SMOKE_TEST").is_some() {
+                eprintln!("Polar frontend ready");
+            }
             mode
         }
         "fullscreen" => window.set_fullscreen(enabled),
         "desktop" => window.minimize(),
         "quit" => window.close(),
+        #[cfg(windows)]
         "login" => return native::set_login(enabled),
         _ => return Err("action".into()),
     }
@@ -431,11 +477,18 @@ pub fn window_action(
 
 #[tauri::command]
 pub fn open_platform(source: String) -> Result<(), String> {
-    let target = match source.as_str() {
-        "steam" => "steam://open/games",
-        "epic" => "com.epicgames.launcher://library",
-        "xbox" => r"shell:AppsFolder\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App",
-        _ => return Err("source".into()),
-    };
-    native::shell(target.as_ref())
+    #[cfg(not(windows))]
+    {
+        native::open_platform(&source)
+    }
+    #[cfg(windows)]
+    {
+        let target = match source.as_str() {
+            "steam" => "steam://open/games",
+            "epic" => "com.epicgames.launcher://library",
+            "xbox" => r"shell:AppsFolder\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App",
+            _ => return Err("source".into()),
+        };
+        native::shell(target.as_ref())
+    }
 }

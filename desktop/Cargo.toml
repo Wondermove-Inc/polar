@@ -1,6 +1,6 @@
 [package]
 name = "polar-desktop"
-version = "1.0.0-rc.18"
+version = "1.0.0-rc.19"
 edition = "2024"
 publish = false
 
@@ -12,14 +12,14 @@ base64 = "0.22"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 url = "2"
+polar = { path = ".." }
+tauri = { version = "2", features = ["custom-protocol"] }
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["sync"] }
 
 [build-dependencies]
 tauri-build = "2"
 
 [target.'cfg(windows)'.dependencies]
-polar = { path = ".." }
-tauri = { version = "2", features = ["custom-protocol"] }
-tauri-plugin-single-instance = "2"
-tokio = { version = "1", features = ["sync"] }
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_Foundation","Win32_UI_WindowsAndMessaging","Win32_System_Threading","Win32_UI_Shell","Win32_UI_Shell_Common","Win32_System_Com","Win32_System_Registry","Win32_UI_Controls_Dialogs","Win32_Storage_FileSystem"] }

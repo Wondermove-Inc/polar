@@ -22,6 +22,7 @@ const labels = {
   login:['Windows 로그인 시 시작','Start when I sign in to Windows'], quit:['Polar 종료','Exit Polar'], quitShort:['종료','Exit'],
   scan:['다시 찾기','Scan again'], scanning:['게임을 찾는 중…','Looking for games…'], ready:['탐색 완료','Scan complete'], partial:['일부 경로를 확인할 수 없습니다','Some locations could not be checked'],
   unconfirmed:['설치 상태 미확인','Installation unconfirmed'], empty:['설치된 게임이 아직 없습니다','No installed games yet'],
+  scanHelp:['Steam 또는 Epic 라이브러리에 게임을 설치한 다음 다시 찾아보세요.','Install a game in your Steam or Epic library, then scan again.'],
   emptyHelp:['설치한 게임을 다시 찾거나 기존 바로가기를 추가하세요.','Scan your libraries or add an existing game shortcut.'],
   noMatches:['이 목록에 게임이 없습니다.','No games in this list.'], manual:['직접 등록','Added by you'],
   shortcut:['바로가기 선택','Choose shortcut'], applications:['Windows 등록 앱','Registered Windows apps'],

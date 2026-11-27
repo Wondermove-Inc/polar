@@ -21,13 +21,15 @@ function fitInterface(){
 }
 fitInterface();
 window.addEventListener('resize',fitInterface);
-const platforms=['steam','xbox','epic','manual'];
+const windows=window.__POLAR_WINDOWS__!==false;
+const platforms=windows?['steam','xbox','epic','manual']:['steam','epic'];
+$('#addEmpty').hidden=$('#addLib').hidden=!windows;
 const platformNames={steam:'Steam',xbox:'PC Game Pass',epic:'Epic Games'};
 const stateKey='polar.desktop.v1';
 let saved={};
 try{saved=JSON.parse(localStorage.getItem(stateKey)||'{}')||{}}catch{}
 const epicLinks=Object.assign(Object.create(null),saved.epicLinks);
-let rows=Array.isArray(saved.rows)?saved.rows.filter(g=>g&&typeof g.id==='string'&&typeof g.name==='string'&&platforms.includes(g.source)):[];
+let rows=Array.isArray(saved.rows)?saved.rows.filter(g=>g&&typeof g.id==='string'&&typeof g.name==='string'&&platforms.includes(g.source)&&platforms.includes(g.bucket??g.source)):[];
 // Both a discovered game and its shortcut point to the same saved favorite.
 let favorites=new Map();
 for(const id of Array.isArray(saved.favorites)?saved.favorites:[]){
@@ -189,7 +191,7 @@ function updateFavoriteAction(){
  const marked=isFavorite(liveFavoriteGame(action.dataset),favorites)||isFavorite(action.dataset,favorites);
  action.textContent=tr(marked?'removeFavorite':'addFavorite');
 }
-const pendingEpic=()=>unresolvedFolders(reports.get('epic'),rows,epicLinks);
+const pendingEpic=()=>windows?unresolvedFolders(reports.get('epic'),rows,epicLinks):[];
 function pendingCard(path){
  const b=button('',()=>addDialog(null,path),'card');
  b.dataset.epicFolder=path;b.title=path;
@@ -245,7 +247,7 @@ function render(focus=false){
  $('.details').hidden=!games.length;$('#homeEmpty').hidden=!!games.length||firstScan;$('#homeLoading').hidden=!!games.length||!firstScan;
  const pending=pendingEpic();
  $('#homeEmpty h2').textContent=tr(pending.length?'foundEpicFolder':'empty');
- $('#homeEmpty p').textContent=tr(pending.length?'connectHelp':'emptyHelp');
+ $('#homeEmpty p').textContent=tr(pending.length?'connectHelp':windows?'emptyHelp':'scanHelp');
  $('#addEmpty').textContent=tr(pending.length?'connectEpic':'add');
  if(!introduced&&(games.length||!firstScan)){
   introduced=true;root.classList.add('entering');setTimeout(()=>root.classList.remove('entering'),650);
@@ -254,7 +256,7 @@ function render(focus=false){
  if(current)select(current,!library&&!panel.open&&(focus||wasRail));
  if(!games.length){background();$('.counter').textContent=libraryCount(0,pending.length)}
  if(library){
-  $('.filters').replaceChildren(...['all','steam','xbox','epic','favorites'].map(k=>{
+  $('.filters').replaceChildren(...['all',...platforms.filter(p=>p!=='manual'),'favorites'].map(k=>{
    const b=button(platformNames[k]||tr(k),()=>{
     if(k!==filter||editing)grid.parentElement.scrollTop=0;
     editing=false;filter=k;render();$('.filter[aria-pressed=true]').focus();
@@ -272,9 +274,9 @@ function render(focus=false){
    const id=aliases.get(focusId)||focusId;
    const target=[...grid.children].find(b=>focusFolder?b.dataset.epicFolder===focusFolder:
     b.dataset.id===id||(active.dataset.alias&&b.dataset.id===active.dataset.alias));
-   (target||grid.firstElementChild||$('#addLib')).focus();
+   (target||grid.firstElementChild||$('.filter[aria-pressed=true]')).focus();
   }
- }else{grid.replaceChildren();if(focus&&!current)$('#addEmpty').focus()}
+ }else{grid.replaceChildren();if(focus&&!current)$(windows?'#addEmpty':'#scanEmpty').focus()}
 }
 function step(direction){
  const i=tiles.findIndex(g=>g.id===current);
@@ -290,7 +292,7 @@ async function loadSource(source){
  const request=Symbol();latestScan.set(source,request);
  let report;
  const args={source};
- if(source==='epic')args.linkedFolders=Object.keys(epicLinks).slice(0,256);
+ if(windows&&source==='epic')args.linkedFolders=Object.keys(epicLinks).slice(0,256);
  try{report=await invoke('discover',args)}catch(e){report={complete:false,warnings:[String(e)],items:[]}}
  if(latestScan.get(source)!==request)return;
  if(source==='manual'&&report.complete){
@@ -379,7 +381,7 @@ function settingsBody(keep=false){
  const expanded=new Set(keep?[...content.querySelectorAll('details[open]')].map(d=>d.dataset.source):[]);
  const focused=keep&&content.contains(document.activeElement)?document.activeElement.dataset.control:null;
  content.replaceChildren();const prefs=el('div');prefs.id='preferences';const nav=el('div','','categories');nav.setAttribute('role','group');nav.ariaLabel=tr('section');
- for(const k of ['display','sources','system']){const b=button(tr(k),()=>{section=k;settingsBody();content.querySelector('.categories [aria-pressed=true]').focus()},'');
+ for(const k of (windows?['display','sources','system']:['display','sources'])){const b=button(tr(k),()=>{section=k;settingsBody();content.querySelector('.categories [aria-pressed=true]').focus()},'');
   b.dataset.control=k;b.setAttribute('aria-pressed',String(section===k));nav.append(b)}
  const body=el('section','','settingGroup');body.ariaLabel=tr(section);prefs.append(nav,body);content.append(prefs);
  if(section==='display'){
@@ -404,22 +406,24 @@ function settingsBody(keep=false){
     d.append(summary,el('div',report.warnings.join('\n'),'faults'));body.append(d);
    }
   }
-  body.append(el('h3',tr('epicFolders')),el('p',tr('epicFolderHelp'),'note'));
-  async function changeFolder(action,path=null){
-   if(folderBusy||scanning)return;
-   folderBusy=true;settingsBody(true);
-   try{
-    const updated=await invoke('epic_folders',{action,path});
-    if(updated.length!==folders.length){folders=updated;await scan()}
-   }catch(e){error(e)}
-   finally{folderBusy=false;if(modal==='settings'&&section==='sources')settingsBody(true)}
+  if(windows){
+   body.append(el('h3',tr('epicFolders')),el('p',tr('epicFolderHelp'),'note'));
+   async function changeFolder(action,path=null){
+    if(folderBusy||scanning)return;
+    folderBusy=true;settingsBody(true);
+    try{
+     const updated=await invoke('epic_folders',{action,path});
+     if(updated.length!==folders.length){folders=updated;await scan()}
+    }catch(e){error(e)}
+    finally{folderBusy=false;if(modal==='settings'&&section==='sources')settingsBody(true)}
+   }
+   for(const path of folders){
+    const row=el('div','','settingRow'),remove=button(tr('removeFolder'),()=>changeFolder('remove',path));
+    remove.disabled=folderBusy||scanning;remove.dataset.control='remove-'+path;remove.ariaLabel=tr('removeFolder')+' · '+path;row.append(el('span',path),remove);body.append(row);
+   }
+   const addFolder=button(tr('addEpicFolder'),()=>changeFolder('add'));
+   addFolder.dataset.control='addEpicFolder';addFolder.disabled=folderBusy||scanning;body.append(addFolder);
   }
-  for(const path of folders){
-   const row=el('div','','settingRow'),remove=button(tr('removeFolder'),()=>changeFolder('remove',path));
-   remove.disabled=folderBusy||scanning;remove.dataset.control='remove-'+path;remove.ariaLabel=tr('removeFolder')+' · '+path;row.append(el('span',path),remove);body.append(row);
-  }
-  const addFolder=button(tr('addEpicFolder'),()=>changeFolder('add'));
-  addFolder.dataset.control='addEpicFolder';addFolder.disabled=folderBusy||scanning;body.append(addFolder);
   const scanBtn=button(tr(scanning?'scanning':'scan'),scan);scanBtn.dataset.control='scan';scanBtn.disabled=scanning;
   body.append(scanBtn);
  }else{
@@ -735,7 +739,7 @@ function navigate(key){
   }
  }
  if(modal==='game'&&['ArrowUp','ArrowDown'].includes(key)){
-  const controls=[...panel.querySelectorAll('button:enabled,input:enabled,summary')].filter(e=>e.checkVisibility()&&!e.closest('[inert]'));
+  const controls=[...panel.querySelectorAll('button:enabled,input:enabled,summary')].filter(e=>e.getClientRects().length&&!e.closest('[inert]'));
   const next=controls.indexOf(active)+(key==='ArrowDown'?1:-1);
   controls[Math.max(0,Math.min(controls.length-1,next))]?.focus();return true;
  }
@@ -790,11 +794,11 @@ setInterval(()=>{
  }last=keys;
 },60);
 localize();render();root.classList.add('ready');setInterval(clock,30000);
-invoke('epic_folders',{action:'list'}).then(result=>{
+if(windows)invoke('epic_folders',{action:'list'}).then(result=>{
  folders=Array.isArray(result)?result:[];if(modal==='settings'&&section==='sources')settingsBody(true);
 }).catch(error);
 present();
-invoke('get_options').then(opts=>{
+if(windows)invoke('get_options').then(opts=>{
  if(login!==undefined)return;
  login=opts.login;
  const input=content.querySelector('input[data-control=login]');

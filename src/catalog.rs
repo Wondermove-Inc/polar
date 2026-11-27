@@ -95,7 +95,11 @@ pub fn steam_scan() -> Report {
         Ok(r) => r,
         Err(e) => return Report::failure(e),
     };
-    let scan = crate::scan(&root);
+    steam_scan_at(&root)
+}
+
+pub fn steam_scan_at(root: &Path) -> Report {
+    let scan = crate::scan(root);
     let cache = root.join("appcache/librarycache");
     let mut result = Report {
         complete: scan.warnings.is_empty(),

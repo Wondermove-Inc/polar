@@ -1,6 +1,6 @@
 # Polar 개발 계획
 
-목표는 Windows 11 개인 PC에서 Steam, Epic Games, PC Game Pass 설치 게임을 패드로 찾고 실행하는 것이다. 제품 범위와 최종 인수 조건은 [PRD](PRD.md), 화면·언어·조작 기준은 [목업](../polar-mockup.html)을 따른다.
+목표는 Windows 11 개인 PC에서 Steam, Epic Games, PC Game Pass 설치 게임을 패드로 찾고 실행하는 것이다. 초기 제품 범위와 인수 조건은 [PRD](PRD.md)에 기록했다. 현재 화면과 지원 운영체제는 [프로젝트 홈](../README.md)에서 확인할 수 있다.
 
 ## 개발 순서
 

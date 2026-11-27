@@ -1,17 +1,16 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-#[cfg(windows)]
 mod commands;
-#[cfg(windows)]
+#[cfg_attr(not(windows), path = "unix_native.rs")]
 mod native;
 #[cfg(windows)]
 mod session;
-#[cfg(windows)]
 fn main() {
     use commands::*;
     use tauri::Manager;
     tauri::Builder::default()
         .plugin(
             tauri::plugin::Builder::<_, ()>::new("local-navigation")
+                .js_init_script(format!("window.__POLAR_WINDOWS__ = {};", cfg!(windows)))
                 .on_navigation(|_, url| {
                     matches!(url.scheme(), "http" | "https")
                         && url.host_str() == Some("tauri.localhost")
@@ -46,9 +45,10 @@ fn main() {
             Ok(())
         })
         .manage(Data::default())
-        .manage(session::Sessions::default())
+        .manage(polar::session::Sessions::default())
         .invoke_handler(tauri::generate_handler![
             discover,
+            #[cfg(windows)]
             epic_folders,
             online_cover,
             epic_cover,
@@ -57,18 +57,19 @@ fn main() {
             online_background,
             launch_game,
             get_session,
+            #[cfg(windows)]
             registered_apps,
             open_platform,
+            #[cfg(windows)]
             pick_shortcut,
+            #[cfg(windows)]
             save_manual,
+            #[cfg(windows)]
             remove_manual,
+            #[cfg(windows)]
             get_options,
             window_action
         ])
         .run(tauri::generate_context!())
         .expect("Polar desktop runtime");
-}
-#[cfg(not(windows))]
-fn main() {
-    eprintln!("Polar desktop requires Windows 11.")
 }

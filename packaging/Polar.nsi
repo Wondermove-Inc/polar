@@ -1,3 +1,6 @@
+!ifndef POLAR_VERSION
+  !error "Pass the app version as POLAR_VERSION"
+!endif
 Unicode true
 RequestExecutionLevel user
 !include "MUI2.nsh"
@@ -107,7 +110,7 @@ installNew:
   CreateDirectory "$SMPROGRAMS\Polar Launcher"
   CreateShortcut "$SMPROGRAMS\Polar Launcher\Polar.lnk" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "DisplayName" "Polar"
-  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "1.0.0-rc.18"
+  WriteRegStr HKCU "${UNKEY}" "DisplayVersion" "${POLAR_VERSION}"
   WriteRegStr HKCU "${UNKEY}" "DisplayIcon" "$INSTDIR\app\Polar.exe"
   WriteRegStr HKCU "${UNKEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   IfErrors failed

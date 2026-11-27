@@ -203,3 +203,6 @@ pub mod appinfo;
 pub mod catalog;
 pub mod saved;
 pub mod session;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod unix_games;

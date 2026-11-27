@@ -2813,7 +2813,7 @@ dependencies = [
 
 [[package]]
 name = "polar-desktop"
-version = "1.0.0-rc.18"
+version = "1.0.0-rc.19"
 dependencies = [
  "base64 0.22.1",
  "image",

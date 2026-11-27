@@ -36,3 +36,13 @@ cargo run --locked -p polar-desktop
 ```
 
 See the [user guide](docs/README.md) for setup and controls, and the [release workflow](.github/workflows/release.yml) for native builds and installer tests. This repository is public. Collaborators with write access can open pull requests, and repository administrators can merge to `main`.
+
+## License and attribution
+
+Wondermove owns the copyright in Polar’s original code and documentation and retains the right to license them.
+
+You may fork this repository. Every fork, even one published under a new name, must include this credit and link to the original repository in its README.
+
+> Based on [Polar by Wondermove](https://github.com/Wondermove-Inc/polar). Copyright © 2026 Wondermove.
+
+Third-party dependencies, fonts, and game artwork remain subject to their respective licenses and copyright notices. [Bundled font notices](docs/FONT-LICENSES.txt)

@@ -67,7 +67,8 @@ async function checkTitleInk(page) {
         samples.card=await measure(page,'.card b');
         await page.locator('#settings').click();
         samples.settings=await measure(page,'.categories button');
-        assert.deepEqual(await page.locator('#panel').boundingBox(),{x:0,y:0,width,height});
+        const drawer=await page.locator('#panel').boundingBox();
+        assert(drawer.x>width/2 && Math.abs(drawer.x+drawer.width-width)<1 && drawer.y===0 && Math.abs(drawer.height-height)<1);
         await page.locator('#close').scrollIntoViewIfNeeded();
         await visibleInside(page,'#close');
         await page.keyboard.press('Escape');

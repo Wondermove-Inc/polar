@@ -38,6 +38,7 @@ const {chromium}=require('playwright');
   const pending=page.locator('.grid [data-epic-folder]');
   await page.locator('#library').click();
   await pending.waitFor({timeout:2000});
+  assert(await pending.locator('.cover').evaluate(e=>Math.abs(e.clientWidth-e.clientHeight)<=1),'pending Epic tile should also be square');
   assert.equal(await pending.count(),1);assert.match(await pending.innerText(),/DeathStranding/);
   assert.match(await page.locator('.counter').innerText(),/0 games.*1/);
   assert(!(await page.locator('.empty').isVisible()));

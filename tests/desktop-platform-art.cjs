@@ -10,11 +10,12 @@ const {chromium}=require('playwright');
    function photo(w,h){
     const c=document.createElement('canvas');c.width=w;c.height=h;return c.toDataURL('image/jpeg');
    }
-   const cover=photo(250,360),hero=photo(1920,1080),square=photo(200,200);
+   const cover=photo(250,360),epicCover=photo(320,360),hero=photo(1920,1080),square=photo(200,200);
    const rows=[
     {id:epic,name:'DeathStranding',source:'epic'},
     {id:'shortcut:opaque',name:'Manual Xbox',source:'xbox',bucket:'manual'},
     {id:'steam:11',name:'Steam game',source:'steam'},
+    {id:'shortcut:local',name:'Local game',source:'manual'},
     {id:'xbox:fm',name:'Football Manager',source:'xbox'},
    ];
    if(!localStorage.getItem('polar.desktop.v1'))localStorage.setItem('polar.desktop.v1',JSON.stringify({rows,current:epic,artSources:{'xbox:fm':'steam:900'}}));
@@ -23,7 +24,7 @@ const {chromium}=require('playwright');
     if(cmd==='discover')return {complete:true,items:rows.filter(r=>(r.bucket||r.source)===a.source),warnings:[]};
     if(cmd==='get_options')return {fullscreen:false,login:false};
     if(cmd==='epic_folders')return [];
-    if(cmd==='epic_cover'&&a.id===epic)return cover;
+    if(cmd==='epic_cover'&&a.id===epic)return epicCover;
     if(cmd==='online_background'&&a.source===epic)return hero;
     if(cmd==='online_cover')return cover;
     if(cmd==='artwork'&&!a.hero&&(a.id==='xbox:fm'||a.id==='shortcut:opaque'))return square;
@@ -51,23 +52,51 @@ const {chromium}=require('playwright');
    if(view==='library')await page.locator('#library').click();
    const cards=await page.locator(view==='home'?'.tile':'.card').evaluateAll((buttons,home)=>buttons.map(b=>{
     const r=(home?b:b.querySelector('.cover')).getBoundingClientRect();
-    return {id:b.dataset.id,ratio:r.width/r.height,top:r.top,bottom:r.bottom,caption:b.querySelector('b')?.getBoundingClientRect().top};
+    return {id:b.dataset.id,selected:b.classList.contains('sel'),width:r.width,ratio:r.width/r.height,top:r.top,bottom:r.bottom,caption:b.querySelector('b')?.getBoundingClientRect().top};
    }),view==='home');
-   for(const card of cards)assert(Math.abs(card.ratio-(['xbox:fm','shortcut:opaque'].includes(card.id)?1:2/3))<.01,JSON.stringify(card));
+   for(const card of cards)assert(Math.abs(card.ratio-1)<.01,JSON.stringify(card));
+   const normal=cards.filter(c=>!c.selected);
+   assert(Math.max(...normal.map(c=>c.width))-Math.min(...normal.map(c=>c.width))<1,'all sources have the same tile width');
+   if(view==='home')assert(cards.find(c=>c.selected).width>normal[0].width,'the selected tile grows');
+   const epicFrame=page.locator((view==='home'?'.tile':'.card')+'[data-id="'+epic+'"]');
+   await epicFrame.locator('img').waitFor();
+   assert.equal(await epicFrame.locator('img').evaluate(i=>getComputedStyle(i).objectFit),'cover','8:9 Epic artwork fills the square');
    assert(Math.max(...cards.map(c=>c.top))-Math.min(...cards.map(c=>c.top))<1);
    if(view==='library'){
     for(const edge of ['bottom','caption'])assert(Math.max(...cards.map(c=>c[edge]))-Math.min(...cards.map(c=>c[edge]))<1,
      'mixed platform '+edge+' should align');
    }
   }
-  await page.locator('.card[data-id="xbox:fm"]').click({button:'right'});
-  assert(await page.locator('.editorGame .cover').evaluate(e=>Math.abs(e.clientWidth-e.clientHeight)<=1));
+  const fullWidth=await page.locator('.card[data-id="steam:11"] .cover').evaluate(e=>e.clientWidth);
+  await page.locator('.filter[data-key="steam"]').click();
+  assert.equal(await page.locator('.card').count(),1);
+  assert.equal(await page.locator('.card .cover').evaluate(e=>e.clientWidth),fullWidth,'a single filtered game keeps the same cell width');
+  await page.locator('.filter[data-key="all"]').click();
+  for(const id of ['steam:11','xbox:fm','shortcut:local']){
+   await page.locator('.card[data-id="'+id+'"]').click({button:'right'});
+   assert(await page.locator('.editorGame .cover').evaluate(e=>Math.abs(e.clientWidth-e.clientHeight)<=1));
+   await page.keyboard.press('Escape');
+  }
+  await page.locator('.card[data-id="'+epic+'"]').click({button:'right'});
+  const preview=page.locator('.editorGame .cover');
+  assert(await preview.evaluate(e=>Math.abs(e.clientWidth-e.clientHeight)<=1));
+  for(const [w,h] of [[220,250],[250,220],[200,400],[400,200]]){
+   const image=await page.evaluate(([w,h])=>{
+    const c=document.createElement('canvas');c.width=w;c.height=h;return c.toDataURL().split(',')[1];
+   },[w,h]);
+   await page.getByLabel('Choose cover image').setInputFiles({name:'custom.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
+   await page.waitForFunction(([w,h])=>{
+    const i=document.querySelector('.editorGame img');return i?.naturalWidth===w&&i.naturalHeight===h&&getComputedStyle(i).objectFit==='cover';
+   },[w,h],{timeout:2500});
+  }
+  await page.getByRole('button',{name:'Restore default cover'}).click();
+  await page.waitForFunction(()=>{const i=document.querySelector('.editorGame img');return i?.naturalWidth===320&&getComputedStyle(i).objectFit==='cover'});
   await page.keyboard.press('Escape');
   await page.locator('#settings').click();
   await page.getByRole('checkbox',{name:'Online game artwork'}).uncheck();await page.reload();
   await page.locator('.tile[data-id^="epic:"]').click();
   await page.waitForFunction(()=>window.calls.some(([k,a])=>k==='epic_cover'&&!a.online)&&window.calls.some(([k,a])=>k==='online_background'&&a.source?.startsWith('epic:')&&!a.online));
   assert(!await page.evaluate(()=>window.calls.some(([k,a])=>['epic_cover','online_cover','online_background'].includes(k)&&a.online)));
-  console.log('Epic automatic cover/background, offline, square native Xbox and mixed grid, centered arrows at three viewport sizes passed.');
+  console.log('Uniform home, library and editor squares, sparse filters, custom artwork and offline backgrounds passed.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -81,7 +81,7 @@ const {chromium}=require('playwright');
       return {fit:s.objectFit,center:s.objectPosition,inside:r.left>=outer.left-1&&r.right<=outer.right+1&&r.top>=outer.top-1&&r.bottom<=outer.bottom+1,
        complete:img.complete&&img.naturalWidth>0,caption:box.textContent};
      });
-     assert.deepEqual(info,{fit:'contain',center:'50% 50%',inside:true,complete:true,caption:''});
+     assert.deepEqual(info,{fit:'cover',center:'50% 50%',inside:true,complete:true,caption:''});
      if(view==='library')assert.equal(await box.locator('..').locator('b').count(),1);
     }
    }

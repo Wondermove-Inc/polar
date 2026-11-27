@@ -210,9 +210,13 @@ function render(focus=false){
  if(!games.length){background();$('.counter').textContent=libraryCount(0,pending.length)}
  if(library){
   $('.filters').replaceChildren(...['all','steam','xbox','epic','favorites'].map(k=>{
-   const b=button(platformNames[k]||tr(k),()=>{editing=false;filter=k;render();[...$('.filters').children].find(x=>x.dataset.key===k)?.focus()},'filter');
+   const b=button(platformNames[k]||tr(k),()=>{
+    if(k!==filter||editing)grid.parentElement.scrollTop=0;
+    editing=false;filter=k;render();$('.filter[aria-pressed=true]').focus();
+   },'filter');
    b.dataset.key=k;b.setAttribute('aria-pressed',String(filter===k));return b;
   }));
+  if(!panel.open&&active.matches('.filter'))$('.filter[data-key="'+active.dataset.key+'"]').focus({preventScroll:true});
   $('#edit').hidden=filter!=='favorites';$('#edit').textContent=tr(editing?'done':'edit');
   const list=libraryView(linkedRows,editing?'all':filter,favorites,lang,names);grid.replaceChildren(...list.map(g=>tile(g,false)));
   const visiblePending=!editing&&(filter==='all'||filter==='epic')?pending:[];
@@ -694,10 +698,16 @@ function navigate(key){
  }
  if(!panel.open&&active.parentElement===grid){moveLibraryCard(active,key);return true}
  const controls=[...(panel.open?panel:root).querySelectorAll('button:not(:disabled),input:not(:disabled),select,summary')].filter(b=>b.offsetWidth&&b.tabIndex>=0);
+ const results=library&&!panel.open?grid.parentElement.getBoundingClientRect():null;
  const r=active.getBoundingClientRect();const h=['ArrowLeft','ArrowRight'].includes(key),sign=['ArrowUp','ArrowLeft'].includes(key)?-1:1;
  let best,score=Infinity;
- for(const b of controls){if(b===active)continue;const t=b.getBoundingClientRect();
-  const dx=t.left+t.width/2-r.left-r.width/2,dy=t.top+t.height/2-r.top-r.height/2,along=sign*(h?dx:dy),across=Math.abs(h?dy:dx);
+ for(const b of controls){
+  const card=results&&b.parentElement===grid;
+  if(b===active||(card&&key!=='ArrowDown'))continue;
+  const t=b.getBoundingClientRect();
+  if(card&&(t.bottom<=results.top||t.top>=results.bottom))continue;
+  const centerY=card?(Math.max(t.top,results.top)+Math.min(t.bottom,results.bottom))/2:t.top+t.height/2;
+  const dx=t.left+t.width/2-r.left-r.width/2,dy=centerY-r.top-r.height/2,along=sign*(h?dx:dy),across=Math.abs(h?dy:dx);
   if(along<3||across>along*2)continue;if(along+across*4<score){score=along+across*4;best=b}}
  if(best){best.focus();return true}return false;
 }

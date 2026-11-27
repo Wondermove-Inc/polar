@@ -14,7 +14,9 @@ const {chromium}=require('playwright');
   Object.defineProperty(navigator,'getGamepads',{value:()=>window.pad?[window.pad]:[]});
   window.exitRequests=0;
   window.__TAURI__={core:{invoke:async(cmd,args)=>{
-   if(cmd==='discover')return new Promise(()=>{});
+   if(cmd==='discover')return new Promise(resolve=>{
+    if(args.source==='epic')window.finishEpic=()=>resolve({complete:true,items:rows.filter(g=>g.source==='epic'),warnings:[]});
+   });
    if(cmd==='get_options')return {fullscreen:true,login:false};
    if(cmd==='launch_game')window.started=true;
    if(cmd==='window_action'&&args.action==='quit')window.exitRequests++;
@@ -80,6 +82,10 @@ const {chromium}=require('playwright');
  }
  await firstCards.last().focus();await press(13);
  assert(await firstCards.last().evaluate(e=>document.activeElement===e),'stay on the final row');
+ const steamFilter=page.locator('.filters [data-key=steam]');
+ await steamFilter.focus();await steamFilter.evaluate(e=>{window.oldFilter=e;window.finishEpic()});
+ await page.waitForFunction(()=>!window.oldFilter.isConnected);
+ assert(await steamFilter.evaluate(e=>e===document.activeElement),'a completed scan preserves the focused filter');
  await page.evaluate(()=>window.pad=null);await page.waitForTimeout(150);
  assert((await page.locator('.footkeys').innerText()).includes('Enter'));
  assert(times.filter(n=>n<3000).length>=9);

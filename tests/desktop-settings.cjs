@@ -4,7 +4,7 @@ const {chromium}=require('playwright');
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.POLAR_CHROME,args:['--no-sandbox']});
  try{
-  for(const [width,height,dpr,locale,motion] of [[640,420,1,'en-US',false],[1572,932,1.25,'ko-KR',true],[3840,2160,1,'ko-KR',false]]){
+  for(const [width,height,dpr,locale,motion] of [[640,420,1,'en-US',false],[1920,420,1,'en-US',true],[1572,932,1.25,'ko-KR',true],[3840,2160,1,'ko-KR',false]]){
    const page=await browser.newPage({viewport:{width,height},deviceScaleFactor:dpr,locale,reducedMotion:width===3840?'reduce':'no-preference'});
    await page.addInitScript(motion=>{
     const rows=Array.from({length:120},(_,i)=>({id:'steam:'+i,source:'steam',name:'Game '+i}));
@@ -77,8 +77,21 @@ const {chromium}=require('playwright');
    }
    await page.keyboard.press('Escape');
    await page.locator('#library').click();await page.locator('.filter[data-key=steam]').click();
-   const lib=page.locator('.lib');await lib.evaluate(e=>e.scrollTop=800);
-   const scroll=await lib.evaluate(e=>e.scrollTop);
+   const results=page.locator('.grid').locator('..');
+   const chrome=page.locator('.libHeading h2, #addLib, .filter, footer');
+   const bounds=()=>chrome.evaluateAll(els=>els.map(e=>e.getBoundingClientRect().toJSON()));
+   const before=await bounds();
+   const card=page.locator('.grid .card').first(), first=await card.boundingBox();
+   const viewport=await results.boundingBox();
+   assert(first.height+10<=viewport.height,'focused card and outline should fit even in a short wide window');
+   await page.mouse.move(first.x+20,first.y+18);await page.mouse.wheel(0,800);
+   await page.waitForFunction(()=>document.querySelector('.grid').parentElement.scrollTop>0);
+   const scroll=await results.evaluate(e=>e.scrollTop);
+   assert((await card.boundingBox()).y<first.y-10,'wheel should move game cards');
+   assert.deepEqual(await bounds(),before,'library heading, actions, filters and footer must stay pinned');
+   await page.keyboard.press('ArrowUp');
+   assert(!(await page.locator('.grid').evaluate(e=>e.contains(document.activeElement))),'Up from a pinned filter enters the header');
+   assert.equal(await results.evaluate(e=>e.scrollTop),scroll);
    await settings.click();await page.locator('[data-control=sources]').click();
    const group=page.locator('.settingGroup');
    await group.locator('summary').first().click();
@@ -90,11 +103,17 @@ const {chromium}=require('playwright');
    await page.evaluate(()=>window.finishScan());
    await page.waitForFunction(()=>!document.querySelector('[data-control=scan]').disabled);
    assert(await group.locator('details').first().evaluate(e=>e.open),'expanded diagnostics must survive scan');
-   assert(Math.abs(await group.evaluate(e=>e.scrollTop)-position)<2,'inner scroll preserved');
+   const afterScan=await group.evaluate(e=>({top:e.scrollTop,max:e.scrollHeight-e.clientHeight}));
+   assert(Math.abs(afterScan.top-Math.min(position,afterScan.max))<2,'inner scroll preserved within new content bounds');
    await page.keyboard.press('Escape');
    assert(await settings.evaluate(e=>e===document.activeElement));
-   assert.equal(await lib.evaluate(e=>e.scrollTop),scroll);
+   assert.equal(await results.evaluate(e=>e.scrollTop),scroll);
    assert.equal(await page.locator('.filter[aria-pressed=true]').getAttribute('data-key'),'steam');
+   await page.locator('.filter[data-key=all]').click();
+   assert.equal(await results.evaluate(e=>e.scrollTop),0,'a new filter starts at its first result');
+   await page.locator('.filter[data-key=xbox]').click();
+   assert(await page.locator('.empty').isVisible());
+   assert.deepEqual(await bounds(),before,'empty result keeps the same header');
    await page.close();
   }
   console.log('Right settings drawer, reduced motion, pointer dismissal, modal focus, fixed header and preserved scroll/filter/diagnostics passed.');

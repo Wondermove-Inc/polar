@@ -74,7 +74,7 @@ function background(refresh=false){
   ambient.style.removeProperty('--cover');
   const request=ambientRequest=active?coverArt(active):null;
   request?.then(image=>{
-   if(typeof image==='string' && !image.startsWith('data:image/x-icon;') && ambientRequest===request)ambient.style.setProperty('--cover','url('+image+')');
+   if(typeof image==='string' && ambientRequest===request)ambient.style.setProperty('--cover','url('+image+')');
   });
  }
  setBackground(library||!game?'':current,source,onlineArt,!!override,refresh);
@@ -122,10 +122,10 @@ function coverCacheKey(id){
 function clearCovers(ids){
  for(const [key,entry] of artCache)if(ids.has(entry.id)||(entry.alias&&ids.has(entry.alias)))artCache.delete(key);
 }
-async function readableCover(url){
+async function decodeCover(url){
  if(typeof url!=='string')return null;
  const image=new Image();image.src=url;
- try{await image.decode();return url}catch{return null}
+ try{await image.decode();return image}catch{return null}
 }
 function coverArt(id){
  const key=coverCacheKey(id);
@@ -135,6 +135,7 @@ function coverArt(id){
   const image=(async()=>{
    const custom=await readCover(id,game?.alias).catch(()=>null);
    if(custom)return custom;
+   let smallIcon;
    let provider=game?.source;
    if(id.startsWith('steam:'))provider='steam';
    if(id.startsWith('epic:')||id.startsWith('epic-short:'))provider='epic';
@@ -150,40 +151,50 @@ function coverArt(id){
     if(newer&&newer!==image)return newer;
     for(const candidate of [id,live.alias]){
      if(!gameIcons.has(candidate))continue;
-     const icon=await readableCover(await invoke('game_icon',{id:candidate}).catch(()=>null));
-     if(icon)return icon;
+     const image=await decodeCover(await invoke('game_icon',{id:candidate}).catch(()=>null));
+     if(!image)continue;
+     const detail=Math.min(image.naturalWidth,image.naturalHeight);
+     const icon={icon:image.src,detail};
+     if(detail>=96)return icon;
+     if(!smallIcon||detail>smallIcon.detail)smallIcon=icon;
     }
    }
+   const canDownload=()=>online&&onlineArt&&!smallIcon;
    async function portrait(){
-    if(!source||(online&&!onlineArt))return null;
-    return invoke('online_cover',{id:Number(source.slice(6)),online}).catch(()=>null);
+    if(!source)return null;
+    return invoke('online_cover',{id:Number(source.slice(6)),online:canDownload()}).catch(()=>null);
    }
    const preferLinked=source&&!id.startsWith('steam:')&&game?.source!=='xbox';
    if(preferLinked){
     const image=await portrait();if(image)return image;
    }
-   const local=await readableCover(await invoke('artwork',{id,hero:false}).catch(()=>null));
-   if(local)return local;
+   const local=await decodeCover(await invoke('artwork',{id,hero:false}).catch(()=>null));
+   if(local && (!smallIcon || Math.min(local.naturalWidth,local.naturalHeight)>smallIcon.detail))return local.src;
    if(source&&!preferLinked){
     const image=await portrait();if(image)return image;
    }
-   if(id.startsWith('epic:'))return invoke('epic_cover',{id,online:online&&onlineArt}).catch(()=>null);
-   return null;
+   if(id.startsWith('epic:')){
+    const cover=await invoke('epic_cover',{id,online:canDownload()}).catch(()=>null);
+    if(cover)return cover;
+   }
+   return smallIcon||null;
   })();
   artCache.set(key,{id,alias:game?.alias,image});
  }
  return artCache.get(key).image;
 }
+function showCover(target,art){
+ if(!art||!target.isConnected)return;
+ const image=new Image();image.alt='';image.draggable=false;
+ if(art.icon)image.className='gameIcon';
+ image.onload=()=>{if(target.contains(image))target.classList.add('hasArt')};
+ image.onerror=()=>image.remove();
+ image.src=art.icon||art;target.append(image);
+}
 const observer=new IntersectionObserver(entries=>{
  for(const {isIntersecting,target} of entries)if(isIntersecting){
    observer.unobserve(target);
-   coverArt(target.dataset.art).then(url=>{
-    if(!url||!target.isConnected)return;
-    const image=new Image();image.alt='';image.draggable=false;
-    image.onload=()=>target.classList.add('hasArt');
-    image.onerror=()=>image.remove();
-    image.src=url;target.append(image);
-   });
+   coverArt(target.dataset.art).then(art=>showCover(target,art));
  }
 });
 function tile(game,small){
@@ -505,12 +516,10 @@ function editGame(game,trigger){
  const reset=button(tr('resetCover'),()=>changeCover(null));reset.hidden=true;
  let lastPreview;
  async function refresh(){
-  const request=lastPreview=coverArt(game.id),url=await request;
+  const request=lastPreview=coverArt(game.id),art=await request;
   if(!main.isConnected||lastPreview!==request)return;
   preview.replaceChildren();preview.classList.remove('hasArt');
-  if(url){
-   const image=new Image();image.alt='';image.onload=()=>{if(preview.contains(image))preview.classList.add('hasArt')};image.src=url;preview.append(image);
-  }
+  showCover(preview,art);
  }
  async function changeCover(file){
   input.disabled=reset.disabled=true;status.textContent='';

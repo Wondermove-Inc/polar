@@ -121,13 +121,26 @@ fn local_icon(state: &Data, id: &str) -> Option<String> {
         .get(id)
         .map(|game| game.icon_files.clone())
         .unwrap_or_default();
-    manual
-        .into_iter()
-        .chain(installed)
-        .find_map(|(path, index)| {
-            crate::icon_file::read(&path, index)
-                .map(|data| format!("data:image/x-icon;base64,{}", STANDARD.encode(data)))
-        })
+    let mut best = None;
+    let mut detail = 0;
+    for (path, index) in manual.into_iter().chain(installed) {
+        if let Some(art) = crate::icon_file::read(&path, index) {
+            let size = art.width().min(art.height());
+            if size > detail {
+                detail = size;
+                best = Some(art);
+            }
+            if detail >= 96 {
+                break;
+            }
+        }
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    best?.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(png.into_inner())
+    ))
 }
 
 #[cfg(windows)]
@@ -583,7 +596,7 @@ mod icon_tests {
         assert!(
             local_icon(&state, &entry.id)
                 .unwrap()
-                .starts_with("data:image/x-icon;base64,")
+                .starts_with("data:image/png;base64,")
         );
         assert!(local_icon(&state, "steam:999").is_none());
         fs::write(url, "[InternetShortcut]\r\nURL=steam://run/999\r\n").unwrap();

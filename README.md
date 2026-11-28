@@ -8,19 +8,19 @@ A desktop launcher for the games you already have installed. Browse Steam, Epic 
 
 | Operating system | Installer | Supported libraries |
 | --- | --- | --- |
-| Windows 11 · x64 | [Download for Windows](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.23/Polar-1.0.0-rc.23-windows-x64-setup.exe) | Steam, Epic Games Launcher, PC Game Pass |
-| Ubuntu 24.04 · x64 | [Download the .deb](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.23/Polar-1.0.0-rc.23-linux-x64.deb) | Steam, Epic games installed through Heroic |
-| macOS 13+ · Apple Silicon | [Download for Apple Silicon](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.23/Polar-1.0.0-rc.23-macos-arm64.dmg) | Steam, Epic Games Launcher |
+| Windows 11 · x64 | [Download for Windows](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.24/Polar-1.0.0-rc.24-windows-x64-setup.exe) | Steam, Epic Games Launcher, PC Game Pass |
+| Ubuntu 24.04 · x64 | [Download the .deb](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.24/Polar-1.0.0-rc.24-linux-x64.deb) | Steam, Epic games installed through Heroic |
+| macOS 13+ · Apple Silicon | [Download for Apple Silicon](https://github.com/Wondermove-Inc/polar/releases/download/v1.0.0-rc.24/Polar-1.0.0-rc.24-macos-arm64.dmg) | Steam, Epic Games Launcher |
 
-On **Windows**, quit Polar and run the installer to install or update it. On **Ubuntu**, run `sudo apt install ./Polar-1.0.0-rc.23-linux-x64.deb` from the download directory. On **Mac**, open the disk image and drag Polar into **Applications**.
+On **Windows**, quit Polar and run the installer to install or update it. On **Ubuntu**, run `sudo apt install ./Polar-1.0.0-rc.24-linux-x64.deb` from the download directory. On **Mac**, open the disk image and drag Polar into **Applications**.
 
-RC23 is a release candidate. The Windows installer is unsigned. The Mac app is ad-hoc signed and has not been notarized by Apple. [Release notes and SHA-256 checksums](https://github.com/Wondermove-Inc/polar/releases/tag/v1.0.0-rc.23)
+RC24 is a release candidate. The Windows installer is unsigned. The Mac app is ad-hoc signed and has not been notarized by Apple. [Release notes and SHA-256 checksums](https://github.com/Wondermove-Inc/polar/releases/tag/v1.0.0-rc.24)
 
 ## Your library
 
 - **Play from the couch.** Navigate with a gamepad, keyboard, or mouse in fullscreen or windowed mode. When Polar can detect a running game, its status appears on the Play button.
 - **Keep favorites up front.** Right-click a tile or open the **…** menu beside Play and choose **Add to favorites**. Favorites appear first on the home screen and in each library filter.
-- **Use local game icons.** On Windows, Steam and Epic tiles use the game’s installed icon when available. A custom cover takes priority.
+- **Use local game icons.** On Windows, Steam and Epic tiles use the game’s installed icon when available. Polar trims transparent margins and fits the icon to the tile. For small icons, it first looks for a sharper cover on your PC. A custom cover takes priority.
 - **Make the artwork yours.** Edit a game’s name, cover, or background. Keep local artwork available offline, or enable online images for high-resolution backgrounds.
 - **Stay where you are.** Open the settings panel to change language, fullscreen, or reduced motion, then close it to return to the selected game.
 

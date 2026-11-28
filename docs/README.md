@@ -4,7 +4,7 @@ This guide covers the Windows 11 desktop app. For Ubuntu and macOS packages and 
 
 ## Getting started on Windows
 
-1. Run `Polar-1.0.0-rc.23-windows-x64-setup.exe`. The installer uses your Windows user account. If the WebView2 Runtime is missing, the installer directs you to Microsoft’s download page.
+1. Run `Polar-1.0.0-rc.24-windows-x64-setup.exe`. The installer uses your Windows user account. If the WebView2 Runtime is missing, the installer directs you to Microsoft’s download page.
 2. Open **Polar** from the Start menu. Polar shows your saved library while it scans Steam, Epic Games and PC Game Pass. Move through games with the arrow keys, the onscreen arrows, or a controller. Press Enter or the controller’s confirm button to play.
 3. Open **Settings → Game library** to see how many games each launcher found and read scan details. Use **Settings → Startup** to launch Polar at Windows sign-in. Close the settings drawer with **Close**, an outside click, Esc or the controller’s back button.
 4. To update, quit Polar using the button next to Settings, then run the new installer. To uninstall, use **Installed apps** in Windows Settings. Polar stores its user data separately from the installation directory and from your games and saves.
@@ -33,7 +33,7 @@ Favorites appear first on Home and in the library’s All and platform views. On
 
 Polar remembers your window mode. Its startup animation takes about a second. Click or press a key or controller button to skip it. Reduced motion in Polar or Windows skips the animation automatically. Text, tiles and controls scale together on large windows and 4K screens.
 
-On Windows, Steam and Epic tiles first use a cover you chose. Otherwise Polar looks for the game’s icon in matching Start menu and desktop Internet Shortcuts (`.url`). It can also read Steam’s cached shortcut icon or the icon embedded in an installed Epic game executable. Small icons stay centered in the square tile. If no usable icon is found, Polar falls back to its usual cover sources.
+On Windows, Steam and Epic tiles first use a cover you chose. Otherwise Polar looks for the game’s icon in matching Start menu and desktop Internet Shortcuts (`.url`). It can also read Steam’s cached shortcut icon or the icon embedded in an installed Epic game executable. Polar trims transparent margins and fits the visible artwork to the square tile. If a shortcut icon is small, Polar checks for an installed or previously cached cover before enlarging the icon. This works offline. If no usable icon is found, Polar falls back to its usual cover sources.
 
 Steam games use their App ID to look up store screenshots. For Epic games with a catalog item ID, Polar looks up artwork metadata through egdata and downloads images from Epic’s CDN. To link another edition or set artwork for a manually added or PC Game Pass title, use **Game background → Find on Steam**. The search sends your chosen title to Steam in the app’s current language. You can also paste an original SteamGridDB Hero image URL in the game editor and choose **Apply image**. [SteamGridDB](https://www.steamgriddb.com/)
 

@@ -52,7 +52,12 @@ let games=[],tiles=[],scanning=false,hasPad=false;
 let launchState=null,pollTimer,lastSerial=0;
 let selectedApps=[],draft=null,replaceId=null,firstScan=true,introduced=false;
 let folders=[],folderBusy=false;
-const reports=new Map(),artCache=new Map();
+const reports=new Map(),artCache=new Map(),gameIcons=new Set();
+const firstReports=new Map(platforms.map(source=>{
+ let received;
+ const ready=new Promise(resolve=>{received=resolve});
+ return [source,{ready,received}];
+}));
 let onlineArt=saved.onlineArt!==false;
 const artSources=Object.assign(Object.create(null),saved.artSources);
 const names=Object.assign(Object.create(null),saved.names);
@@ -69,7 +74,7 @@ function background(refresh=false){
   ambient.style.removeProperty('--cover');
   const request=ambientRequest=active?coverArt(active):null;
   request?.then(image=>{
-   if(image && ambientRequest===request)ambient.style.setProperty('--cover','url('+image+')');
+   if(typeof image==='string' && !image.startsWith('data:image/x-icon;') && ambientRequest===request)ambient.style.setProperty('--cover','url('+image+')');
   });
  }
  setBackground(library||!game?'':current,source,onlineArt,!!override,refresh);
@@ -112,10 +117,15 @@ function steamCover(id){
 }
 function coverCacheKey(id){
  const game=games.find(g=>g.id===id);
- return [id,game?.source,game?.alias,steamCover(id),onlineArt].join('|');
+ return [id,game?.source,game?.alias,gameIcons.has(id),gameIcons.has(game?.alias),steamCover(id),onlineArt].join('|');
 }
 function clearCovers(ids){
- for(const [key,entry] of artCache)if(ids.has(entry.id))artCache.delete(key);
+ for(const [key,entry] of artCache)if(ids.has(entry.id)||(entry.alias&&ids.has(entry.alias)))artCache.delete(key);
+}
+async function readableCover(url){
+ if(typeof url!=='string')return null;
+ const image=new Image();image.src=url;
+ try{await image.decode();return url}catch{return null}
 }
 function coverArt(id){
  const key=coverCacheKey(id);
@@ -125,6 +135,25 @@ function coverArt(id){
   const image=(async()=>{
    const custom=await readCover(id,game?.alias).catch(()=>null);
    if(custom)return custom;
+   let provider=game?.source;
+   if(id.startsWith('steam:'))provider='steam';
+   if(id.startsWith('epic:')||id.startsWith('epic-short:'))provider='epic';
+   if(windows&&(provider==='steam'||provider==='epic')){
+    // Cached rows can paint before Windows indexes the local icons for this game and its shortcut.
+    if(!reports.has(provider)||!reports.has('manual')){
+     await Promise.all([firstReports.get(provider).ready,firstReports.get('manual').ready]);
+    }
+    const live=games.find(g=>g.id===id||g.alias===id);
+    if(!live)return null;
+    if(coverCacheKey(live.id)!==key)return coverArt(live.id);
+    const newer=artCache.get(key)?.image;
+    if(newer&&newer!==image)return newer;
+    for(const candidate of [id,live.alias]){
+     if(!gameIcons.has(candidate))continue;
+     const icon=await readableCover(await invoke('game_icon',{id:candidate}).catch(()=>null));
+     if(icon)return icon;
+    }
+   }
    async function portrait(){
     if(!source||(online&&!onlineArt))return null;
     return invoke('online_cover',{id:Number(source.slice(6)),online}).catch(()=>null);
@@ -133,18 +162,15 @@ function coverArt(id){
    if(preferLinked){
     const image=await portrait();if(image)return image;
    }
-   const local=await invoke('artwork',{id,hero:false}).catch(()=>null);
-   if(typeof local==='string'){
-    const image=new Image();image.src=local;
-    try{await image.decode();return local}catch{}
-   }
+   const local=await readableCover(await invoke('artwork',{id,hero:false}).catch(()=>null));
+   if(local)return local;
    if(source&&!preferLinked){
     const image=await portrait();if(image)return image;
    }
    if(id.startsWith('epic:'))return invoke('epic_cover',{id,online:online&&onlineArt}).catch(()=>null);
    return null;
   })();
-  artCache.set(key,{id,image});
+  artCache.set(key,{id,alias:game?.alias,image});
  }
  return artCache.get(key).image;
 }
@@ -308,7 +334,12 @@ async function loadSource(source){
   const ids=new Set(report.items.filter(g=>g.source==='epic').map(g=>g.id));
   for(const [path,id] of Object.entries(epicLinks))if(!ids.has(id))delete epicLinks[path];
  }
- reports.set(source,report);rows=mergeSource(rows,source,report);clearCovers(new Set(report.items.map(item=>item.id)));render();if(rows.some(g=>g.id===current&&(g.bucket??g.source)===source))background(true);persist();
+ reports.set(source,report);
+ rows=mergeSource(rows,source,report);
+ gameIcons.clear();
+ for(const item of rows)if(item.hasGameIcon)gameIcons.add(item.id);
+ firstReports.get(source).received();
+ clearCovers(new Set(report.items.map(item=>item.id)));render();if(rows.some(g=>g.id===current&&(g.bucket??g.source)===source))background(true);persist();
  if(modal==='settings'&&section==='sources')settingsBody(true);
 }
 async function scan(){

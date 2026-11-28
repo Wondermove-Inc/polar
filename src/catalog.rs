@@ -18,9 +18,27 @@ pub struct Item {
     pub root: PathBuf,
     #[serde(skip)]
     pub cover: Option<PathBuf>,
+    #[cfg_attr(not(windows), serde(skip))]
+    #[cfg_attr(
+        windows,
+        serde(
+            rename = "hasGameIcon",
+            skip_serializing_if = "Vec::is_empty",
+            serialize_with = "icon_available"
+        )
+    )]
+    pub icon_files: Vec<(PathBuf, i32)>,
     #[serde(skip)]
     pub hero: Option<PathBuf>,
 }
+#[cfg(windows)]
+fn icon_available<S: serde::Serializer>(
+    files: &[(PathBuf, i32)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bool(!files.is_empty())
+}
+
 #[derive(Default, Debug, Serialize)]
 pub struct Report {
     pub items: Vec<Item>,
@@ -107,14 +125,14 @@ pub fn steam_scan_at(root: &Path) -> Report {
         ..Report::default()
     };
     let ids = scan.games.iter().map(|g| g.id).collect();
-    let kinds = crate::appinfo::installed(&root.join("appcache"), &ids);
+    let apps = crate::appinfo::installed_apps(&root.join("appcache"), &ids);
     let mut unknown = 0;
     for g in scan.games {
-        if !kinds.contains_key(&g.id) {
+        let Some(app) = apps.get(&g.id) else {
             unknown += 1;
             continue;
-        }
-        if kinds.get(&g.id) != Some(&true) || g.id == 228980 {
+        };
+        if !app.is_game || g.id == 228980 {
             continue;
         }
         let id = g.id.to_string();
@@ -126,6 +144,11 @@ pub fn steam_scan_at(root: &Path) -> Report {
             source: "steam".into(),
             target: format!("steam://run/{id}"),
             root: g.installation,
+            icon_files: app
+                .client_icon
+                .iter()
+                .map(|hash| (root.join("steam/games").join(format!("{hash}.ico")), 0))
+                .collect(),
             cover,
             hero,
         });
@@ -327,6 +350,7 @@ impl EpicLibrary {
         target: (String, String),
         root: PathBuf,
         name: Option<String>,
+        executable: Option<&Path>,
     ) {
         let (id, target) = target;
         if self.seen.contains(&id) {
@@ -344,7 +368,26 @@ impl EpicLibrary {
         };
         self.seen.insert(id.clone());
         self.installed.insert(epic_root_key(&root));
+        let mut icon_files = Vec::new();
+        if let Some(exe) = executable.filter(|p| {
+            extension(p, "exe")
+                && p.components().all(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                })
+        }) {
+            icon_files.push((root.join(exe), 0));
+        } else if executable.is_none()
+            && let Some(folder) = root.file_name()
+        {
+            let mut filename = folder.to_owned();
+            filename.push(".exe");
+            icon_files.push((root.join(filename), 0));
+        }
         report.items.push(Item {
+            icon_files,
             id,
             name,
             source: "epic".into(),
@@ -473,6 +516,7 @@ impl EpicLibrary {
                 target,
                 root,
                 record["displayName"].as_str().map(str::to_owned),
+                Some(path),
             );
         }
         Ok(true)
@@ -522,7 +566,13 @@ impl EpicLibrary {
                     .insert(target.0);
                 continue;
             }
-            self.add(report, target, rec.install_location, Some(rec.display_name));
+            self.add(
+                report,
+                target,
+                rec.install_location,
+                Some(rec.display_name),
+                Some(Path::new(&rec.launch_executable)),
+            );
         }
     }
 
@@ -578,7 +628,7 @@ impl EpicLibrary {
             if candidates.len() == 1
                 && let Some((id, (target, name))) = candidates.pop_first()
             {
-                self.add(report, (id, target), root, name);
+                self.add(report, (id, target), root, name, None);
             } else if candidates.len() > 1 {
                 report.warn(format!(
                     "{}: ambiguous Epic install records",
@@ -637,7 +687,7 @@ impl EpicLibrary {
             }
         }
         if candidates.len() == 1 {
-            self.add(report, candidates.pop().unwrap(), root.into(), None);
+            self.add(report, candidates.pop().unwrap(), root.into(), None, None);
         } else if candidates.len() > 1 {
             report.warn(format!(
                 "{}: ambiguous Epic install records",
@@ -873,6 +923,7 @@ pub fn xbox_drives(rows: &[Registration], drives: &[PathBuf]) -> Report {
                 source: "xbox".into(),
                 target: format!("shell:AppsFolder\\{}", row.id),
                 root: root.clone(),
+                icon_files: Vec::new(),
                 cover: cover.clone(),
                 hero: hero.clone(),
             });

@@ -1,4 +1,4 @@
-//! Read only installed apps' common/type from the local Steam binary cache.
+//! Read installed apps' classification and shortcut icon identifier from the local Steam binary cache.
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -6,6 +6,12 @@ use std::{
     path::Path,
 };
 type Types = HashMap<u32, bool>;
+
+pub(crate) struct App {
+    pub is_game: bool,
+    pub client_icon: Option<String>,
+}
+type Apps = HashMap<u32, App>;
 fn n32(s: &mut &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(s.split_off(..4)?.try_into().ok()?))
 }
@@ -21,7 +27,11 @@ fn keys(mut data: &[u8], count: u32) -> Option<Vec<&[u8]>> {
     }
     (0..count).map(|_| string(&mut data)).collect()
 }
-fn kind(mut data: &[u8], table: Option<&[&[u8]]>) -> Option<bool> {
+fn common_value<'a>(
+    mut data: &'a [u8],
+    table: Option<&[&[u8]]>,
+    wanted: &[u8],
+) -> Option<&'a [u8]> {
     let mut stack = Vec::new();
     while !data.is_empty() {
         let (&ty, rest) = data.split_first()?;
@@ -44,12 +54,8 @@ fn kind(mut data: &[u8], table: Option<&[&[u8]]>) -> Option<bool> {
             }
             1 => {
                 let value = string(&mut data)?;
-                if key == b"type" && stack.as_slice() == [b"appinfo".as_slice(), b"common"] {
-                    return Some(
-                        [b"game".as_slice(), b"demo", b"mod", b"beta", b"playtest"]
-                            .iter()
-                            .any(|s| value.eq_ignore_ascii_case(s)),
-                    );
+                if key == wanted && stack.as_slice() == [b"appinfo".as_slice(), b"common"] {
+                    return Some(value);
                 }
             }
             2..=4 | 6 => data = data.get(4..)?,
@@ -65,17 +71,30 @@ fn block<R: Read + Seek>(r: &mut R, offset: u64, size: usize) -> Option<Vec<u8>>
     r.read_exact(&mut bytes).ok()?;
     Some(bytes)
 }
-fn read_types<R: Read + Seek>(r: &mut R, ids: &HashSet<u32>) -> Option<Types> {
+fn read_apps<R: Read + Seek>(r: &mut R, ids: &HashSet<u32>) -> Option<Apps> {
     let len = r.seek(SeekFrom::End(0)).ok()?;
     let head = block(r, 0, 16)?;
     let magic = n32(&mut head.as_slice())?;
-    let mut out = Types::new();
+    let mut out = Apps::new();
     let mut record = |r: &mut R, id: u32, offset: u64, size: u64, keys: Option<&[&[u8]]>| {
         if ids.contains(&id)
             && let Some(bytes) = block(r, offset, size.min(128 * 1024) as usize)
-            && let Some(is_game) = kind(&bytes, keys)
+            && let Some(kind) = common_value(&bytes, keys, b"type")
         {
-            out.insert(id, is_game);
+            let is_game = [b"game".as_slice(), b"demo", b"mod", b"beta", b"playtest"]
+                .iter()
+                .any(|s| kind.eq_ignore_ascii_case(s));
+            let client_icon = common_value(&bytes, keys, b"clienticon")
+                .filter(|v| v.len() == 40 && v.iter().all(u8::is_ascii_hexdigit))
+                .and_then(|v| std::str::from_utf8(v).ok())
+                .map(str::to_owned);
+            out.insert(
+                id,
+                App {
+                    is_game,
+                    client_icon,
+                },
+            );
         }
     };
     match magic {
@@ -148,11 +167,21 @@ fn read_types<R: Read + Seek>(r: &mut R, ids: &HashSet<u32>) -> Option<Types> {
         _ => None,
     }
 }
+fn types(apps: Apps) -> Types {
+    apps.into_iter()
+        .map(|(id, info)| (id, info.is_game))
+        .collect()
+}
+
 pub fn categories(bytes: &[u8], ids: &HashSet<u32>) -> Option<Types> {
-    read_types(&mut Cursor::new(bytes), ids)
+    read_apps(&mut Cursor::new(bytes), ids).map(types)
 }
 pub fn installed(cache: &Path, ids: &HashSet<u32>) -> Types {
-    let mut types = Types::new();
+    types(installed_apps(cache, ids))
+}
+
+pub(crate) fn installed_apps(cache: &Path, ids: &HashSet<u32>) -> Apps {
+    let mut types = Apps::new();
     if ids.is_empty() {
         return types;
     }
@@ -166,7 +195,7 @@ pub fn installed(cache: &Path, ids: &HashSet<u32>) -> Types {
     }
     for p in paths {
         if let Ok(file) = File::open(p)
-            && let Some(found) = read_types(&mut BufReader::new(file), ids)
+            && let Some(found) = read_apps(&mut BufReader::new(file), ids)
         {
             types.extend(found)
         }

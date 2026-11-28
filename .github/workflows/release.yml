@@ -93,6 +93,7 @@ jobs:
           trap 'kill "$server" 2>/dev/null || true' EXIT
           curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "$POLAR_TEST_URL" -o /dev/null
           node tests/desktop-readability.cjs
+          node tests/desktop-game-icons.cjs
       - name: Test the native code
         run: cargo test --workspace --release --locked
       - name: Test the library model

@@ -1,9 +1,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod commands;
+#[cfg(any(windows, test))]
+mod icon_file;
 #[cfg_attr(not(windows), path = "unix_native.rs")]
 mod native;
 #[cfg(windows)]
 mod session;
+#[cfg(windows)]
+mod shortcut_icons;
 fn main() {
     use commands::*;
     use tauri::Manager;
@@ -52,6 +56,8 @@ fn main() {
             epic_folders,
             online_cover,
             epic_cover,
+            #[cfg(windows)]
+            game_icon,
             artwork,
             search_backgrounds,
             online_background,

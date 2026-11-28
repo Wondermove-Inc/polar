@@ -147,6 +147,7 @@ fn heroic_games(manifest: &Path) -> Report {
             source: "epic".into(),
             target: format!("heroic://launch/legendary/{app}"),
             root: root.into(),
+            icon_files: Vec::new(),
             cover: None,
             hero: None,
         });

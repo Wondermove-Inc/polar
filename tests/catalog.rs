@@ -1,3 +1,4 @@
+mod common;
 use polar::catalog::{Registration, epic_scan, shortcut_target, xbox_games};
 use std::fs;
 use tempfile::tempdir;
@@ -404,6 +405,7 @@ fn epic_reports_only_unique_confirmed_identities_for_requested_linked_folders() 
             root: PathBuf::from(root),
             target: String::new(),
             hero: None,
+            icon_files: Vec::new(),
             cover: None,
         });
     }
@@ -463,5 +465,68 @@ fn epic_engine_metadata_never_creates_a_game_shortcut_prompt() {
             "{file:?}: {report:?}"
         );
         fs::remove_file(file).unwrap();
+    }
+}
+
+#[test]
+fn steam_uses_the_installed_apps_own_cached_shortcut_icon() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    common::library(root, r#""libraryfolders" {}"#);
+    let hash = "abcdef0123456789abcdef0123456789abcdef01";
+    let mut info = Vec::from([0x28, 0x44, 0x56, 0x07, 1, 0, 0, 0]);
+    for (id, icon) in [(10u32, hash), (11, "../other")] {
+        common::install(root, id, &format!("Game {id}"));
+        let mut payload = vec![0; 60];
+        payload.extend(b"\0appinfo\0\0common\0\x01type\0Game\0\x01clienticon\0");
+        payload.extend(icon.bytes());
+        payload.extend([0, 8, 8, 8]);
+        info.extend(id.to_le_bytes());
+        info.extend((payload.len() as u32).to_le_bytes());
+        info.extend(payload);
+    }
+    info.extend([0; 4]);
+    fs::create_dir_all(root.join("appcache")).unwrap();
+    fs::write(root.join("appcache/appinfo.vdf"), info).unwrap();
+    let report = polar::catalog::steam_scan_at(root);
+    let first = report.items.iter().find(|g| g.id == "steam:10").unwrap();
+    assert_eq!(
+        first.icon_files,
+        vec![(root.join("steam/games").join(format!("{hash}.ico")), 0)]
+    );
+    let second = report.items.iter().find(|g| g.id == "steam:11").unwrap();
+    assert!(second.icon_files.is_empty());
+    let public = serde_json::to_value(first).unwrap();
+    assert_eq!(
+        public.get("hasGameIcon").and_then(|v| v.as_bool()),
+        cfg!(windows).then_some(true)
+    );
+    assert!(!public.to_string().contains(hash));
+}
+
+#[test]
+fn epic_uses_only_an_executable_inside_the_installation_as_an_icon_candidate() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("DeathStranding");
+    fs::create_dir_all(root.join("bin")).unwrap();
+    let manifests = tmp.path().join("Manifests");
+    fs::create_dir(&manifests).unwrap();
+    for (path, expected) in [
+        ("bin/Game.exe", true),
+        ("../other.exe", false),
+        ("bin/file.txt", false),
+    ] {
+        let record = serde_json::json!({"DisplayName":"Death Stranding","InstallLocation":root,
+            "AppName":"Boga","CatalogItemId":"item","CatalogNamespace":"ns","LaunchExecutable":path});
+        fs::write(manifests.join("game.item"), record.to_string()).unwrap();
+        let report = epic_scan(&manifests);
+        let item = &report.items[0];
+        assert_eq!(item.icon_files.contains(&(root.join(path), 0)), expected);
+        assert!(
+            item.icon_files
+                .iter()
+                .all(|(file, _)| file.starts_with(&root))
+        );
+        assert!(item.cover.is_none());
     }
 }

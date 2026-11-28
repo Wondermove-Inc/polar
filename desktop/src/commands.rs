@@ -23,6 +23,8 @@ pub struct Data {
     pub presented: std::sync::atomic::AtomicBool,
     pub known: Mutex<HashMap<String, Item>>,
     #[cfg(windows)]
+    manual_icons: Mutex<HashMap<String, (PathBuf, i32)>>,
+    #[cfg(windows)]
     pub writes: Mutex<()>,
     #[cfg(windows)]
     pub pending: Mutex<Option<Manual>>,
@@ -42,6 +44,39 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+#[cfg(windows)]
+fn manual_report(state: &Data, entries: Vec<Manual>) -> Report {
+    let mut icons = HashMap::new();
+    let mut report = Report::ok();
+    for entry in entries {
+        let mut item = entry.display();
+        if let Approved::Shortcut(path) = &entry.approved
+            && let Some((id, file, index)) = crate::shortcut_icons::shortcut_icon(path)
+            && id == entry.id
+        {
+            item.icon_files.push((file.clone(), index));
+            icons.insert(id, (file, index));
+        }
+        report.items.push(item);
+    }
+    *state.manual_icons.lock().unwrap() = icons;
+    report
+}
+
+#[cfg(windows)]
+fn attach_game_icons(items: &mut [Item]) {
+    let mut shortcuts = crate::shortcut_icons::discover(items);
+    for item in items {
+        let mut files = shortcuts.remove(&item.id).unwrap_or_default();
+        for entry in item.icon_files.drain(..) {
+            if !files.contains(&entry) && crate::shortcut_icons::local_file(&entry.0) {
+                files.push(entry);
+            }
+        }
+        item.icon_files = files;
+    }
+}
+
 #[tauri::command]
 pub async fn discover(
     app: AppHandle,
@@ -52,15 +87,16 @@ pub async fn discover(
         #[cfg(windows)]
         if source == "manual" {
             let entries = native::read_manual(&file(&app)?)?;
-            return Ok(Report {
-                items: entries.iter().map(Manual::display).collect(),
-                ..Report::ok()
-            });
+            return Ok(manual_report(&app.state::<Data>(), entries));
         }
         if !(matches!(source.as_str(), "steam" | "epic") || (cfg!(windows) && source == "xbox")) {
             return Err("source".into());
         }
         let mut report = native::source(&source);
+        #[cfg(windows)]
+        if matches!(source.as_str(), "steam" | "epic") && !report.items.is_empty() {
+            attach_game_icons(&mut report.items);
+        }
         if source == "epic" {
             report.match_epic_links(linked_folders.as_deref().unwrap_or_default());
         }
@@ -73,6 +109,33 @@ pub async fn discover(
         Ok(report)
     })
     .await
+}
+
+#[cfg(windows)]
+fn local_icon(state: &Data, id: &str) -> Option<String> {
+    let manual = state.manual_icons.lock().unwrap().get(id).cloned();
+    let installed = state
+        .known
+        .lock()
+        .unwrap()
+        .get(id)
+        .map(|game| game.icon_files.clone())
+        .unwrap_or_default();
+    manual
+        .into_iter()
+        .chain(installed)
+        .find_map(|(path, index)| {
+            crate::icon_file::read(&path, index)
+                .map(|data| format!("data:image/x-icon;base64,{}", STANDARD.encode(data)))
+        })
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn game_icon(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let _slot = SLOTS.acquire().await.map_err(|_| "closed")?;
+    blocking(move || Ok(local_icon(&app.state::<Data>(), &id))).await
 }
 
 #[tauri::command]
@@ -490,5 +553,41 @@ pub fn open_platform(source: String) -> Result<(), String> {
             _ => return Err("source".into()),
         };
         native::shell(target.as_ref())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod icon_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn approved_shortcut_reads_its_own_icon_offline_and_rejects_a_changed_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let icon = temp.path().join("Custom.ico");
+        fs::write(&icon, include_bytes!("../icons/icon.ico")).unwrap();
+        let url = temp.path().join("game.url");
+        fs::write(&url, format!("[InternetShortcut]\r\nURL=steam://rungameid/2215430\r\nIconFile={}\r\nIconIndex=0\r\n",icon.display())).unwrap();
+        let entry = Manual {
+            id: "steam:2215430".into(),
+            name: "Ghost".into(),
+            source: "steam".into(),
+            approved: Approved::Shortcut(url.clone()),
+        };
+        let state = Data::default();
+        let report = manual_report(&state, vec![entry.clone()]);
+        assert_eq!(
+            serde_json::to_value(&report.items[0]).unwrap()["hasGameIcon"],
+            true
+        );
+        assert!(
+            local_icon(&state, &entry.id)
+                .unwrap()
+                .starts_with("data:image/x-icon;base64,")
+        );
+        assert!(local_icon(&state, "steam:999").is_none());
+        fs::write(url, "[InternetShortcut]\r\nURL=steam://run/999\r\n").unwrap();
+        manual_report(&state, vec![entry.clone()]);
+        assert!(local_icon(&state, &entry.id).is_none());
     }
 }

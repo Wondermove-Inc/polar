@@ -24,6 +24,7 @@ impl Manual {
             source: self.source.clone(),
             target: String::new(),
             root: PathBuf::new(),
+            icon_files: Vec::new(),
             cover: None,
             hero: None,
         }
